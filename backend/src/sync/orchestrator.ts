@@ -145,11 +145,11 @@ async function processEventChange(
       return;
     }
 
-    // Check if mirror event ID matches (another loop prevention layer)
+    // Check if this event IS the mirror of a previously synced event (second loop prevention layer)
     if (existingEvent.mirrorEventId) {
       const mirrorCheck = await db.event.findFirst({
         where: {
-          sourceEventId: existingEvent.mirrorEventId,
+          mirrorEventId: sourceEventId,
           sourcePlatform: targetProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT',
         },
       });

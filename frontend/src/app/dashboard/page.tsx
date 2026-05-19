@@ -433,55 +433,69 @@ function WebhooksPanel() {
 }
 
 function SecurityPanel() {
+  const [sec, setSec] = useState<any>(null);
+  useEffect(() => {
+    fetch('/api/admin/security', { credentials: 'include' })
+      .then(r => r.json()).then(d => d.success && setSec(d.data));
+  }, []);
+
   return (
     <div className="stats-grid animate-stagger">
       <div className="stat-card">
         <span className="stat-icon">🔐</span>
         <div className="stat-label">Encryption</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>AES-256-GCM</div>
-        <div className="stat-change positive">✓ Active</div>
+        <div className="stat-value" style={{ fontSize: '18px', color: 'var(--success)' }}>{sec?.encryption?.algorithm || 'AES-256-GCM'}</div>
+        <div className="stat-change positive">Active</div>
       </div>
       <div className="stat-card">
         <span className="stat-icon">🛡️</span>
         <div className="stat-label">Auth Protocol</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>OAuth 2.0</div>
-        <div className="stat-change positive">✓ Secure</div>
+        <div className="stat-value" style={{ fontSize: '18px', color: 'var(--success)' }}>{sec?.authProtocol || 'OAuth 2.0'}</div>
+        <div className="stat-change positive">Secure</div>
+      </div>
+      <div className="stat-card">
+        <span className="stat-icon">📝</span>
+        <div className="stat-label">Audit Log Entries</div>
+        <div className="stat-value" style={{ color: 'var(--accent-primary)' }}>{sec?.auditLogs?.total ?? '—'}</div>
+        <div className="stat-change positive">Immutable / Append-only</div>
+      </div>
+      <div className="stat-card">
+        <span className="stat-icon">⚠️</span>
+        <div className="stat-label">Failed Logins (24h)</div>
+        <div className="stat-value" style={{ color: sec?.threats?.recentFailedLogins ? 'var(--error)' : 'var(--success)' }}>
+          {sec?.threats?.recentFailedLogins ?? '—'}
+        </div>
+        <div className={`stat-change ${sec?.threats?.recentFailedLogins ? 'negative' : 'positive'}`}>
+          {sec?.threats?.recentFailedLogins ? 'Needs review' : 'All clear'}
+        </div>
+      </div>
+      <div className="stat-card">
+        <span className="stat-icon">🔄</span>
+        <div className="stat-label">Sync Loops Prevented</div>
+        <div className="stat-value" style={{ color: 'var(--success)' }}>{sec?.threats?.loopsPrevented ?? '—'}</div>
+        <div className="stat-change positive">Fingerprint protection</div>
+      </div>
+      <div className="stat-card">
+        <span className="stat-icon">🔗</span>
+        <div className="stat-label">Active Webhooks</div>
+        <div className="stat-value" style={{ color: 'var(--accent-primary)' }}>{sec?.webhooks?.active ?? '—'}</div>
+        <div className={`stat-change ${sec?.webhooks?.expired ? 'negative' : 'positive'}`}>
+          {sec?.webhooks?.expired ? `${sec.webhooks.expired} expired` : 'All healthy'}
+        </div>
       </div>
       <div className="stat-card">
         <span className="stat-icon">🚫</span>
-        <div className="stat-label">Search Indexing</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>Blocked</div>
-        <div className="stat-change positive">✓ Not indexed</div>
+        <div className="stat-label">Invalid Webhooks</div>
+        <div className="stat-value" style={{ color: sec?.threats?.invalidWebhooks ? 'var(--warning)' : 'var(--success)' }}>
+          {sec?.threats?.invalidWebhooks ?? '—'}
+        </div>
+        <div className="stat-change positive">Spoofing attempts blocked</div>
       </div>
       <div className="stat-card">
         <span className="stat-icon">🔒</span>
         <div className="stat-label">SQL Injection</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>Protected</div>
-        <div className="stat-change positive">✓ Prisma ORM</div>
-      </div>
-      <div className="stat-card">
-        <span className="stat-icon">🧱</span>
-        <div className="stat-label">XSS Prevention</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>Active</div>
-        <div className="stat-change positive">✓ Helmet + CSP</div>
-      </div>
-      <div className="stat-card">
-        <span className="stat-icon">⚡</span>
-        <div className="stat-label">Rate Limiting</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>Enabled</div>
-        <div className="stat-change positive">✓ 100 req/15min</div>
-      </div>
-      <div className="stat-card">
-        <span className="stat-icon">🍪</span>
-        <div className="stat-label">Cookies</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>HttpOnly</div>
-        <div className="stat-change positive">✓ Secure + SameSite</div>
-      </div>
-      <div className="stat-card">
-        <span className="stat-icon">📝</span>
-        <div className="stat-label">Audit Logs</div>
-        <div className="stat-value" style={{ fontSize: '20px', color: 'var(--success)' }}>Immutable</div>
-        <div className="stat-change positive">✓ Append-only</div>
+        <div className="stat-value" style={{ fontSize: '16px', color: 'var(--success)' }}>Protected</div>
+        <div className="stat-change positive">{sec?.features?.sqlInjectionProtection || 'Prisma ORM'}</div>
       </div>
     </div>
   );

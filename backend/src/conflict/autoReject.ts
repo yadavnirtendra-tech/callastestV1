@@ -26,11 +26,15 @@ export async function handleAutoRejection(
 
   try {
     // 1. Record conflict in database
+    if (!conflictResult.conflicts.length) {
+      conflictLogger.warn({ userId }, 'handleAutoRejection called with empty conflicts array — skipping');
+      return;
+    }
     const mainConflict = conflictResult.conflicts[0];
     await db.conflictLog.create({
       data: {
-        eventId: mainConflict?.existingEvent?.eventId !== 'incoming' 
-          ? mainConflict.existingEvent.eventId 
+        eventId: mainConflict.existingEvent?.eventId && mainConflict.existingEvent.eventId !== 'incoming'
+          ? mainConflict.existingEvent.eventId
           : uuidv4(),
         userId,
         conflictType: mainConflict?.type?.toUpperCase() as any || 'TIME_OVERLAP',

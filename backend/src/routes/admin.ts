@@ -188,4 +188,59 @@ router.get('/webhooks', async (_req: Request, res: Response) => {
   res.json({ success: true, data: { subscriptions } });
 });
 
+/** Get security posture overview */
+router.get('/security', async (_req: Request, res: Response) => {
+  const db = getDatabase();
+
+  const [
+    totalAuditLogs,
+    recentFailedLogins,
+    invalidWebhooks,
+    loopsPrevented,
+    activeWebhooks,
+    expiredWebhooks,
+  ] = await Promise.all([
+    db.auditLog.count(),
+    db.auditLog.count({
+      where: {
+        action: 'LOGIN_FAILED',
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+    }),
+    db.auditLog.count({
+      where: { action: 'WEBHOOK_INVALID' },
+    }),
+    db.auditLog.count({
+      where: { action: 'SYNC_LOOP_PREVENTED' },
+    }),
+    db.webhookSubscription.count({ where: { status: 'ACTIVE' } }),
+    db.webhookSubscription.count({
+      where: { expiresAt: { lt: new Date() } },
+    }),
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      encryption: { algorithm: 'AES-256-GCM', status: 'active' },
+      authProtocol: 'OAuth 2.0',
+      auditLogs: { total: totalAuditLogs, immutable: true },
+      threats: {
+        recentFailedLogins,
+        invalidWebhooks,
+        loopsPrevented,
+      },
+      webhooks: { active: activeWebhooks, expired: expiredWebhooks },
+      features: {
+        helmet: true,
+        cors: true,
+        rateLimiting: true,
+        csrfProtection: true,
+        httpOnlyCookies: true,
+        sqlInjectionProtection: 'Prisma ORM',
+      },
+    },
+  });
+});
+
 export default router;
