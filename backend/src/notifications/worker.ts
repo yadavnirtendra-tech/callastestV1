@@ -2,11 +2,11 @@
 // Enterprise Calendar Sync — Notification Worker
 // ============================================================
 // Polls the notifications table every 30 seconds and sends
-// any pending emails. Marks them sent or failed.
+// any pending emails via the smart email router.
 // ============================================================
 
 import { getPendingNotifications, markNotificationSent } from './dispatcher';
-import { sendEmail } from './emailSender';
+import { sendRoutedEmail } from './emailRouter';
 import { notificationLogger } from '../utils/logger';
 import getDatabase from '../database/client';
 
@@ -15,7 +15,6 @@ let workerTimer: NodeJS.Timeout | null = null;
 export function startNotificationWorker(): void {
   notificationLogger.info('Notification worker starting — polling every 30s');
 
-  // Run immediately on boot
   processQueue().catch(err =>
     notificationLogger.error({ err }, 'Initial notification processing failed')
   );
@@ -50,16 +49,21 @@ async function processQueue(): Promise<void> {
           continue;
         }
 
-        await sendEmail({
+        const meta = notification.metadata as any;
+
+        // Use smart router — picks Gmail API, MS Graph, or SendGrid
+        // based on user preference + which platform the event came from
+        await sendRoutedEmail({
+          userId: notification.userId,
           to: recipientEmail,
           subject: notification.subject,
           html: notification.body,
+          sourceProvider: meta?.sourceProvider as 'GOOGLE' | 'MICROSOFT' | undefined,
         });
 
         await markNotificationSent(notification.id);
 
-        // If this was a conflict rejection, mark the conflict log as notified
-        const meta = notification.metadata as any;
+        // Mark conflict log as notified
         if (meta?.conflictLogId) {
           const db = getDatabase();
           await db.conflictLog.update({

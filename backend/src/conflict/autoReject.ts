@@ -69,6 +69,9 @@ export async function handleAutoRejection(
         startTime: event.startTime,
         endTime: event.endTime,
         conflictCount: conflictResult.conflicts.length,
+        // Tell the email router which platform this event came from
+        // so it can send the reply via the matching provider (Gmail / MS Graph)
+        sourceProvider: calendar?.provider as 'GOOGLE' | 'MICROSOFT' | undefined,
       },
     });
 
