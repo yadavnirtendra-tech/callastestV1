@@ -62,7 +62,8 @@ router.post('/google', async (req: Request, res: Response) => {
     }
 
     // Verify token matches userId (prevents spoofed webhooks)
-    if (channelToken && channelToken !== subscription.calendar.userId) {
+    // Must reject if token is missing OR mismatched — not just mismatched
+    if (!channelToken || channelToken !== subscription.calendar.userId) {
       webhookLogger.warn({ channelId }, 'Google webhook token mismatch — potential spoofing');
       return;
     }
