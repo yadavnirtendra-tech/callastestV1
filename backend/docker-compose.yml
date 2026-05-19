@@ -1,0 +1,99 @@
+# ============================================================
+# Enterprise Calendar Sync — Docker Compose
+# ============================================================
+# Run: docker-compose up -d
+# This creates:
+#   - calendarsync_app database (SEPARATE from your existing DBs)
+#   - Redis for caching/queues
+#   - The application server
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ---- PostgreSQL ----
+  # Creates a NEW database called "calendarsync_app"
+  # Runs on port 5433 to avoid conflicting with your existing PostgreSQL on 5432
+  postgres:
+    image: postgres:16-alpine
+    container_name: calendarsync-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: calendarsync_app
+      POSTGRES_USER: calendarsync_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-CalSync_Secure_2024!}
+    volumes:
+      - calendarsync_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calendarsync_user -d calendarsync_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - calendarsync-network
+
+  # ---- Redis ----
+  redis:
+    image: redis:7-alpine
+    container_name: calendarsync-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-CalSync_Redis_2024!}
+    volumes:
+      - calendarsync_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CalSync_Redis_2024!}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - calendarsync-network
+
+  # ---- Application Server ----
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: calendarsync-app
+    restart: unless-stopped
+    ports:
+      - "4400:4400"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4400
+      DATABASE_URL: postgresql://calendarsync_user:${DB_PASSWORD:-CalSync_Secure_2024!}@postgres:5432/calendarsync_app
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-CalSync_Redis_2024!}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4400}
+      ADMIN_DASHBOARD_URL: ${ADMIN_DASHBOARD_URL:-http://localhost:3000}
+    networks:
+      - calendarsync-network
+
+volumes:
+  calendarsync_pgdata:
+    name: calendarsync_pgdata
+  calendarsync_redis_data:
+    name: calendarsync_redis_data
+
+networks:
+  calendarsync-network:
+    name: calendarsync-network
+    driver: bridge

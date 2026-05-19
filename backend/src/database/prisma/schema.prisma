@@ -1,0 +1,369 @@
+// ============================================================
+// Prisma Schema — Enterprise Calendar Sync
+// ============================================================
+// This creates a SEPARATE database called "calendarsync_app".
+// It will NEVER touch your existing databases.
+// All sensitive fields are encrypted at the application layer
+// using AES-256-GCM before being stored.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---- Users ----
+model User {
+  id                          String    @id @default(uuid()) @db.Uuid
+  email                       String    @unique @db.VarChar(255)
+  displayName                 String    @db.VarChar(255)
+  role                        UserRole  @default(USER)
+  
+  // OAuth tokens — AES-256-GCM encrypted at app layer
+  googleAccessToken           String?   @db.Text
+  googleRefreshToken          String?   @db.Text
+  googleTokenExpiresAt        DateTime?
+  microsoftAccessToken        String?   @db.Text
+  microsoftRefreshToken       String?   @db.Text
+  microsoftTokenExpiresAt     DateTime?
+  
+  googleConnected             Boolean   @default(false)
+  microsoftConnected          Boolean   @default(false)
+  isActive                    Boolean   @default(true)
+  lastSyncAt                  DateTime?
+  
+  calendars                   Calendar[]
+  conflictLogs                ConflictLog[]
+  auditLogs                   AuditLog[]
+  notifications               Notification[]
+  
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  @@index([email])
+  @@index([isActive])
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+  VIEWER
+}
+
+// ---- Calendars ----
+model Calendar {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @db.Uuid
+  provider            Provider
+  externalCalendarId  String    @db.VarChar(500)
+  name                String    @db.VarChar(255)
+  timezone            String    @db.VarChar(100) @default("UTC")
+  isPrimary           Boolean   @default(false)
+  syncEnabled         Boolean   @default(true)
+  lastSyncedAt        DateTime?
+  syncToken           String?   @db.Text   // Google sync token / Microsoft delta link
+  
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events              Event[]
+  webhookSubscriptions WebhookSubscription[]
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([userId, provider, externalCalendarId])
+  @@index([userId])
+  @@index([provider])
+  @@map("calendars")
+}
+
+enum Provider {
+  GOOGLE
+  MICROSOFT
+}
+
+// ---- Events (Single Source of Truth) ----
+model Event {
+  id                  String    @id @default(uuid()) @db.Uuid
+  calendarId          String    @db.Uuid
+  globalEventUuid     String    @unique @db.VarChar(100)
+  
+  // Source tracking
+  sourcePlatform      Provider
+  sourceEventId       String    @db.VarChar(500)
+  mirrorEventId       String?   @db.VarChar(500)
+  mirrorPlatform      Provider?
+  
+  // Loop prevention
+  syncFingerprint     String    @db.VarChar(128)
+  idempotencyKey      String    @unique @db.VarChar(200)
+  syncVersion         Int       @default(1)
+  
+  // Event data (title/description encrypted at app layer)
+  title               String    @db.Text
+  description         String    @db.Text @default("")
+  startTime           DateTime  @db.Timestamptz
+  endTime             DateTime  @db.Timestamptz
+  timezone            String    @db.VarChar(100) @default("UTC")
+  isAllDay            Boolean   @default(false)
+  location            String    @db.Text @default("")
+  
+  // Status
+  status              EventStatus @default(CONFIRMED)
+  visibility          EventVisibility @default(DEFAULT)
+  showAs              ShowAs      @default(BUSY)
+  
+  // People
+  organizerEmail      String    @db.VarChar(255)
+  organizerName       String    @db.VarChar(255) @default("")
+  isOrganizer         Boolean   @default(false)
+  attendees           Json      @default("[]") // Encrypted JSON array
+  
+  // Recurrence
+  recurrenceRule      Json?     // RFC 5545 recurrence rule
+  recurringEventId    String?   @db.VarChar(500)
+  isRecurringInstance  Boolean   @default(false)
+  
+  // Extras
+  reminders           Json      @default("[]")
+  meetingLink         String    @db.Text @default("")
+  attachments         Json      @default("[]")
+  colorCategory       String    @db.VarChar(50) @default("")
+  
+  // Sync metadata
+  syncState           SyncState       @default(PENDING)
+  conflictState       ConflictState   @default(NONE)
+  originPlatform      Provider
+  lastModifiedAt      DateTime  @db.Timestamptz @default(now())
+  lastModifiedBy      String    @db.VarChar(255) @default("")
+  etag                String    @db.VarChar(255) @default("")
+  
+  calendar            Calendar  @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  syncTransactions    SyncTransaction[]
+  conflictLogs        ConflictLog[]
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([calendarId])
+  @@index([sourcePlatform, sourceEventId])
+  @@index([mirrorPlatform, mirrorEventId])
+  @@index([syncFingerprint])
+  @@index([syncState])
+  @@index([startTime, endTime])
+  @@index([organizerEmail])
+  @@map("events")
+}
+
+enum EventStatus {
+  CONFIRMED
+  TENTATIVE
+  CANCELLED
+}
+
+enum EventVisibility {
+  PUBLIC
+  PRIVATE
+  CONFIDENTIAL
+  DEFAULT
+}
+
+enum ShowAs {
+  FREE
+  BUSY
+  TENTATIVE
+  OOF
+  WORKING_ELSEWHERE
+  UNKNOWN
+}
+
+enum SyncState {
+  PENDING
+  SYNCING
+  SYNCED
+  CONFLICT
+  ERROR
+  SKIPPED
+}
+
+enum ConflictState {
+  NONE
+  DETECTED
+  RESOLVED
+  MANUAL_REVIEW
+}
+
+// ---- Sync Transactions ----
+model SyncTransaction {
+  id                  String    @id @default(uuid()) @db.Uuid
+  eventId             String    @db.Uuid
+  transactionId       String    @unique @db.VarChar(100)
+  direction           SyncDirection
+  action              SyncAction
+  status              SyncTransactionStatus @default(PENDING)
+  sourceEventId       String    @db.VarChar(500)
+  targetEventId       String?   @db.VarChar(500)
+  sourcePayload       Json      @default("{}")
+  targetPayload       Json?
+  errorMessage        String?   @db.Text
+  retryCount          Int       @default(0)
+  maxRetries          Int       @default(5)
+  startedAt           DateTime  @db.Timestamptz @default(now())
+  completedAt         DateTime? @db.Timestamptz
+  
+  event               Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  createdAt           DateTime  @default(now())
+
+  @@index([eventId])
+  @@index([status])
+  @@index([direction])
+  @@index([createdAt])
+  @@map("sync_transactions")
+}
+
+enum SyncDirection {
+  GOOGLE_TO_OUTLOOK
+  OUTLOOK_TO_GOOGLE
+}
+
+enum SyncAction {
+  CREATE
+  UPDATE
+  DELETE
+  ACCEPT
+  DECLINE
+  RESCHEDULE
+}
+
+enum SyncTransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+  DEAD_LETTER
+  SKIPPED
+}
+
+// ---- Conflict Logs ----
+model ConflictLog {
+  id                  String    @id @default(uuid()) @db.Uuid
+  eventId             String    @db.Uuid
+  userId              String    @db.Uuid
+  conflictType        ConflictType
+  resolution          ConflictResolution
+  conflictingEventData Json
+  rejectionReason     String    @db.Text @default("")
+  notificationSent    Boolean   @default(false)
+  
+  event               Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt           DateTime  @default(now())
+
+  @@index([eventId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("conflict_logs")
+}
+
+enum ConflictType {
+  TIME_OVERLAP
+  DOUBLE_BOOKING
+  VERSION_CONFLICT
+  RECURRING_OVERLAP
+  FOCUS_TIME_VIOLATION
+  OUT_OF_OFFICE_CONFLICT
+}
+
+enum ConflictResolution {
+  AUTO_REJECTED
+  ADMIN_OVERRIDE
+  LATEST_WINS
+  SOURCE_PRIORITY
+  ORGANIZER_PRIORITY
+  MANUAL
+}
+
+// ---- Audit Logs (IMMUTABLE — no updates or deletes) ----
+model AuditLog {
+  id                  BigInt    @id @default(autoincrement())
+  userId              String?   @db.Uuid
+  action              String    @db.VarChar(100)
+  resourceType        String    @db.VarChar(50)
+  resourceId          String    @db.VarChar(255)
+  oldValue            Json?
+  newValue            Json?
+  ipAddress           String    @db.VarChar(45)
+  userAgent           String    @db.Text @default("")
+  source              String    @db.VarChar(20) @default("system")
+  metadata            Json      @default("{}")
+  
+  user                User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  createdAt           DateTime  @default(now())
+
+  // Immutability: No updatedAt field — these records are write-once
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---- Webhook Subscriptions ----
+model WebhookSubscription {
+  id                  String    @id @default(uuid()) @db.Uuid
+  calendarId          String    @db.Uuid
+  provider            Provider
+  channelId           String    @unique @db.VarChar(255)
+  resourceId          String    @db.VarChar(500) @default("")
+  webhookUrl          String    @db.Text
+  clientState         String    @db.VarChar(255) @default("")
+  expiresAt           DateTime  @db.Timestamptz
+  status              WebhookStatus @default(ACTIVE)
+  
+  calendar            Calendar  @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([calendarId])
+  @@index([provider])
+  @@index([expiresAt])
+  @@index([status])
+  @@map("webhook_subscriptions")
+}
+
+enum WebhookStatus {
+  ACTIVE
+  EXPIRED
+  ERROR
+}
+
+// ---- Notifications ----
+model Notification {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @db.Uuid
+  type                String    @db.VarChar(50)
+  channel             String    @db.VarChar(20)
+  subject             String    @db.VarChar(500)
+  body                String    @db.Text
+  status              String    @db.VarChar(20) @default("pending")
+  metadata            Json      @default("{}")
+  sentAt              DateTime? @db.Timestamptz
+  
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt           DateTime  @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("notifications")
+}
