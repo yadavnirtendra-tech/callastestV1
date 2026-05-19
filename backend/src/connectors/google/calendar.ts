@@ -18,6 +18,7 @@ import { decrypt, encrypt } from '../../crypto/encryption';
 import getDatabase from '../../database/client';
 import { CanonicalEvent, CalendarProvider, EventStatus, EventVisibility, ShowAsStatus, AttendeeResponseStatus, FreeBusySlot } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
+import { googleRruleToCanonical, canonicalToGoogleRrule } from '../../sync/recurringEvents';
 
 /**
  * Create an authenticated OAuth2 client for a user.
@@ -287,7 +288,7 @@ export function googleEventToCanonical(
       isOptional: a.optional || false,
       isOrganizer: a.organizer || false,
     })),
-    recurrenceRule: googleEvent.recurrence ? parseGoogleRecurrence(googleEvent.recurrence) : null,
+    recurrenceRule: googleEvent.recurrence ? googleRruleToCanonical(googleEvent.recurrence) : null,
     recurringEventId: googleEvent.recurringEventId || null,
     isRecurringInstance: !!googleEvent.recurringEventId,
     meetingLink: googleEvent.hangoutLink || googleEvent.conferenceData?.entryPoints?.[0]?.uri || '',
@@ -322,6 +323,10 @@ function canonicalToGoogleEvent(event: CanonicalEvent): calendar_v3.Schema$Event
   } else {
     googleEvent.start = { dateTime: event.startTime.toISOString(), timeZone: event.timezone };
     googleEvent.end = { dateTime: event.endTime.toISOString(), timeZone: event.timezone };
+  }
+
+  if (event.recurrenceRule) {
+    googleEvent.recurrence = canonicalToGoogleRrule(event.recurrenceRule as any);
   }
 
   return googleEvent;
@@ -384,21 +389,3 @@ function reverseMapResponseStatus(status: AttendeeResponseStatus): string {
   }
 }
 
-function parseGoogleRecurrence(recurrence: string[]): any {
-  // Basic RRULE parser — expand as needed
-  const rrule = recurrence.find(r => r.startsWith('RRULE:'));
-  if (!rrule) return null;
-  const parts = rrule.replace('RRULE:', '').split(';');
-  const rule: any = {};
-  for (const part of parts) {
-    const [key, value] = part.split('=');
-    switch (key) {
-      case 'FREQ': rule.frequency = value.toLowerCase(); break;
-      case 'INTERVAL': rule.interval = parseInt(value); break;
-      case 'COUNT': rule.count = parseInt(value); break;
-      case 'UNTIL': rule.until = value; break;
-      case 'BYDAY': rule.byDay = value.split(','); break;
-    }
-  }
-  return rule;
-}

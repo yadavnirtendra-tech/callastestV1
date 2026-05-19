@@ -164,7 +164,80 @@ export async function checkForConflicts(
       }
     }
 
-    // 3. Determine recommendation
+    // 3. Check for Out-of-Office conflicts
+    if (user) {
+      const oofEvents = await db.event.findMany({
+        where: {
+          calendar: { userId },
+          showAs: 'OOF',
+          startTime: { lt: endTime },
+          endTime: { gt: startTime },
+        },
+      });
+      for (const oof of oofEvents) {
+        conflicts.push({
+          id: uuidv4(),
+          type: ConflictType.OUT_OF_OFFICE_CONFLICT,
+          incomingEvent: {
+            eventId: 'incoming',
+            title: '(Incoming event)',
+            startTime, endTime,
+            provider: 'google' as any,
+            organizerEmail: '',
+            status: 'confirmed',
+          },
+          existingEvent: {
+            eventId: oof.id,
+            title: oof.title,
+            startTime: oof.startTime,
+            endTime: oof.endTime,
+            provider: oof.calendar?.provider?.toLowerCase() as any || 'google',
+            organizerEmail: oof.organizerEmail,
+            status: 'oof',
+          },
+          overlapMinutes: getOverlapMinutes(startTime, endTime, oof.startTime, oof.endTime),
+          severity: ConflictSeverity.CRITICAL,
+        });
+      }
+
+      // 4. Check for Focus Time violations
+      const focusEvents = await db.event.findMany({
+        where: {
+          calendar: { userId },
+          showAs: 'FREE',
+          title: { contains: 'Focus', mode: 'insensitive' } as any,
+          startTime: { lt: endTime },
+          endTime: { gt: startTime },
+        },
+      });
+      for (const focus of focusEvents) {
+        conflicts.push({
+          id: uuidv4(),
+          type: ConflictType.FOCUS_TIME_VIOLATION,
+          incomingEvent: {
+            eventId: 'incoming',
+            title: '(Incoming event)',
+            startTime, endTime,
+            provider: 'google' as any,
+            organizerEmail: '',
+            status: 'confirmed',
+          },
+          existingEvent: {
+            eventId: focus.id,
+            title: focus.title,
+            startTime: focus.startTime,
+            endTime: focus.endTime,
+            provider: focus.calendar?.provider?.toLowerCase() as any || 'google',
+            organizerEmail: focus.organizerEmail,
+            status: 'focus',
+          },
+          overlapMinutes: getOverlapMinutes(startTime, endTime, focus.startTime, focus.endTime),
+          severity: ConflictSeverity.HIGH,
+        });
+      }
+    }
+
+    // 5. Determine recommendation
     const recommendation = determineRecommendation(conflicts);
 
     conflictLogger.info({

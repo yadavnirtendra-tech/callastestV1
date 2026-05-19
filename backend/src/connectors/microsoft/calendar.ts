@@ -18,6 +18,7 @@ import { decrypt, encrypt } from '../../crypto/encryption';
 import getDatabase from '../../database/client';
 import { CanonicalEvent, CalendarProvider, EventStatus, EventVisibility, ShowAsStatus, AttendeeResponseStatus, FreeBusySlot } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
+import { microsoftRecurrenceToCanonical, canonicalToMicrosoftRecurrence } from '../../sync/recurringEvents';
 
 // MSAL instance for token acquisition
 const msalApp = new ConfidentialClientApplication({
@@ -268,7 +269,7 @@ export function microsoftEventToCanonical(msEvent: any, calendarId: string): Par
       isOptional: a.type === 'optional',
       isOrganizer: false,
     })),
-    recurrenceRule: msEvent.recurrence ? parseMicrosoftRecurrence(msEvent.recurrence) : null,
+    recurrenceRule: msEvent.recurrence ? microsoftRecurrenceToCanonical(msEvent.recurrence) : null,
     meetingLink: msEvent.onlineMeeting?.joinUrl || msEvent.onlineMeetingUrl || '',
     etag: msEvent['@odata.etag'] || '',
     lastModifiedAt: new Date(msEvent.lastModifiedDateTime || Date.now()),
@@ -277,7 +278,7 @@ export function microsoftEventToCanonical(msEvent: any, calendarId: string): Par
 }
 
 function canonicalToMicrosoftEvent(event: CanonicalEvent): any {
-  return {
+  const msEvent: any = {
     subject: event.title,
     body: { contentType: 'text', content: event.description },
     start: { dateTime: event.startTime.toISOString().replace('Z', ''), timeZone: event.timezone || 'UTC' },
@@ -290,6 +291,12 @@ function canonicalToMicrosoftEvent(event: CanonicalEvent): any {
       type: a.isOptional ? 'optional' : 'required',
     })),
   };
+
+  if (event.recurrenceRule) {
+    msEvent.recurrence = canonicalToMicrosoftRecurrence(event.recurrenceRule as any);
+  }
+
+  return msEvent;
 }
 
 // ---- Status Mappers ----
@@ -344,11 +351,3 @@ function reverseMapShowAs(status: ShowAsStatus): string {
   }
 }
 
-function parseMicrosoftRecurrence(recurrence: any): any {
-  if (!recurrence?.pattern) return null;
-  return {
-    frequency: recurrence.pattern.type?.replace('absolute', '').toLowerCase() || 'daily',
-    interval: recurrence.pattern.interval || 1,
-    byDay: recurrence.pattern.daysOfWeek || [],
-  };
-}
