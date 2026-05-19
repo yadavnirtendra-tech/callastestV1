@@ -70,6 +70,7 @@ router.get('/users', async (req: Request, res: Response) => {
       select: {
         id: true, email: true, displayName: true, role: true,
         googleConnected: true, microsoftConnected: true,
+        emailProvider: true,
         isActive: true, lastSyncAt: true, createdAt: true,
         _count: { select: { calendars: true } },
       },
@@ -186,6 +187,36 @@ router.get('/webhooks', async (_req: Request, res: Response) => {
   });
 
   res.json({ success: true, data: { subscriptions } });
+});
+
+/** Update a user's email provider preference */
+router.patch('/users/:id/email-provider', async (req: Request, res: Response) => {
+  const db = getDatabase();
+  const { id } = req.params;
+  const { emailProvider } = req.body;
+
+  const valid = ['AUTO', 'GOOGLE', 'MICROSOFT', 'SENDGRID'];
+  if (!valid.includes(emailProvider)) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_PROVIDER', message: `emailProvider must be one of: ${valid.join(', ')}` },
+    });
+    return;
+  }
+
+  const user = await db.user.findUnique({ where: { id } });
+  if (!user) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
+    return;
+  }
+
+  const updated = await db.user.update({
+    where: { id },
+    data: { emailProvider: emailProvider as any },
+    select: { id: true, email: true, displayName: true, emailProvider: true },
+  });
+
+  res.json({ success: true, data: { user: updated } });
 });
 
 /** Get security posture overview */

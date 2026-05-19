@@ -293,12 +293,39 @@ function SyncMonitorPanel() {
   );
 }
 
+const EMAIL_PROVIDER_LABELS: Record<string, string> = {
+  AUTO: '🤖 Auto (smart route)',
+  GOOGLE: '📧 Gmail API',
+  MICROSOFT: '📨 MS Graph',
+  SENDGRID: '📬 SendGrid SMTP',
+};
+
 function UsersPanel() {
   const [users, setUsers] = useState<any[]>([]);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+
   useEffect(() => {
-    fetch('/api/admin/users', { credentials: 'include' })
+    fetch('/api/admin/users?limit=100', { credentials: 'include' })
       .then(r => r.json()).then(d => d.success && setUsers(d.data.users));
   }, []);
+
+  async function changeEmailProvider(userId: string, provider: string) {
+    setUpdatingId(userId);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/email-provider`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailProvider: provider }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, emailProvider: provider } : u));
+      }
+    } finally {
+      setUpdatingId(null);
+    }
+  }
 
   return (
     <div className="table-container">
@@ -307,7 +334,7 @@ function UsersPanel() {
       </div>
       <table>
         <thead>
-          <tr><th>User</th><th>Role</th><th>Google</th><th>Microsoft</th><th>Calendars</th><th>Status</th><th>Last Sync</th></tr>
+          <tr><th>User</th><th>Role</th><th>Google</th><th>Microsoft</th><th>Email Route</th><th>Calendars</th><th>Status</th><th>Last Sync</th></tr>
         </thead>
         <tbody>
           {users.map((u: any) => (
@@ -319,6 +346,26 @@ function UsersPanel() {
               <td><span className={`badge ${u.role === 'ADMIN' ? 'badge-error' : 'badge-info'}`}>{u.role}</span></td>
               <td>{u.googleConnected ? <span className="badge badge-success">✓ Connected</span> : <span className="badge badge-warning">Not connected</span>}</td>
               <td>{u.microsoftConnected ? <span className="badge badge-success">✓ Connected</span> : <span className="badge badge-warning">Not connected</span>}</td>
+              <td>
+                <select
+                  value={u.emailProvider || 'AUTO'}
+                  disabled={updatingId === u.id}
+                  onChange={e => changeEmailProvider(u.id, e.target.value)}
+                  style={{
+                    background: 'var(--surface-2, #1e2130)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    cursor: updatingId === u.id ? 'wait' : 'pointer',
+                  }}
+                >
+                  {Object.entries(EMAIL_PROVIDER_LABELS).map(([val, label]) => (
+                    <option key={val} value={val}>{label}</option>
+                  ))}
+                </select>
+              </td>
               <td>{u._count?.calendars || 0}</td>
               <td>{u.isActive ? <span className="badge badge-success"><span className="badge-dot" /> Active</span> : <span className="badge badge-error">Inactive</span>}</td>
               <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{u.lastSyncAt ? new Date(u.lastSyncAt).toLocaleString() : 'Never'}</td>

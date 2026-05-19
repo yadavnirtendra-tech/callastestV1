@@ -35,6 +35,9 @@ model User {
   microsoftConnected          Boolean   @default(false)
   isActive                    Boolean   @default(true)
   lastSyncAt                  DateTime?
+
+  // Email sending preference: AUTO uses the platform the event came from
+  emailProvider               EmailProvider @default(AUTO)
   
   calendars                   Calendar[]
   conflictLogs                ConflictLog[]
@@ -53,6 +56,17 @@ enum UserRole {
   ADMIN
   USER
   VIEWER
+}
+
+// AUTO = use the platform the event came from (Google event → Gmail, Outlook event → MS Graph)
+// GOOGLE = always send via Gmail API
+// MICROSOFT = always send via Microsoft Graph
+// SENDGRID = always send via SendGrid SMTP
+enum EmailProvider {
+  AUTO
+  GOOGLE
+  MICROSOFT
+  SENDGRID
 }
 
 // ---- Calendars ----
