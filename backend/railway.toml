@@ -1,0 +1,13 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npm run build && npx prisma generate --schema=src/database/prisma/schema.prisma"
+
+[deploy]
+startCommand = "npx prisma migrate deploy --schema=src/database/prisma/schema.prisma && npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[environments.production]
+variables = { NODE_ENV = "production", PORT = "4400" }

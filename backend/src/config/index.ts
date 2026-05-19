@@ -40,7 +40,9 @@ export const config = {
   },
 
   // ---- Redis ----
+  // Railway provides REDIS_URL; local dev uses host/port.
   redis: {
+    url: process.env.REDIS_URL || undefined,
     host: optionalEnv('REDIS_HOST', 'localhost'),
     port: parseInt(optionalEnv('REDIS_PORT', '6379'), 10),
     password: process.env.REDIS_PASSWORD || undefined,
