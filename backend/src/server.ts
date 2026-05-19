@@ -29,6 +29,7 @@ import webhookRoutes from './routes/webhooks';
 import adminRoutes from './routes/admin';
 import healthRoutes from './routes/health';
 import { startWebhookRenewalService, stopWebhookRenewalService } from './sync/webhookRenewal';
+import { startNotificationWorker, stopNotificationWorker } from './notifications/worker';
 
 const app = express();
 
@@ -126,6 +127,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 const server = app.listen(config.port, config.host, () => {
   // Start webhook auto-renewal (runs every 6h, no ngrok needed)
   startWebhookRenewalService();
+  // Start email notification worker (polls every 30s)
+  startNotificationWorker();
 
   logger.info(`
 ╔══════════════════════════════════════════════════════════╗
@@ -156,6 +159,7 @@ async function gracefulShutdown(signal: string) {
   logger.info(`Received ${signal}. Shutting down gracefully...`);
 
   stopWebhookRenewalService();
+  stopNotificationWorker();
   server.close(async () => {
     await disconnectDatabase();
     logger.info('Server shut down complete');

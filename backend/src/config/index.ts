@@ -114,6 +114,15 @@ export const config = {
     format: optionalEnv('LOG_FORMAT', 'pretty'),
   },
 
+  // ---- Email (SMTP) ----
+  email: {
+    host: optionalEnv('SMTP_HOST', ''),
+    port: parseInt(optionalEnv('SMTP_PORT', '587'), 10),
+    user: optionalEnv('SMTP_USER', ''),
+    pass: optionalEnv('SMTP_PASS', ''),
+    from: optionalEnv('SMTP_FROM', ''),
+  },
+
   // ---- Admin Dashboard ----
   adminDashboard: {
     url: optionalEnv('ADMIN_DASHBOARD_URL', 'http://localhost:3000'),
