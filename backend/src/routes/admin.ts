@@ -192,7 +192,7 @@ router.get('/webhooks', async (_req: Request, res: Response) => {
 /** Update a user's email provider preference */
 router.patch('/users/:id/email-provider', async (req: Request, res: Response) => {
   const db = getDatabase();
-  const { id } = req.params;
+  const id: string = req.params.id;
   const { emailProvider } = req.body;
 
   const valid = ['AUTO', 'GOOGLE', 'MICROSOFT', 'SENDGRID'];
