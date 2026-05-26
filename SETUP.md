@@ -205,13 +205,71 @@ This is the complete reference. Legend: **🔴 required** · 🟡 needed for ful
 | `HOST` | ⚪ | Defaults to `0.0.0.0` (correct for containers) |
 | `API_BASE_URL` | 🟡 | Local: `http://localhost:4400`. Prod: your Railway URL |
 
-### Database (the 4 truly required vars)
+### Database (the 5 truly required vars)
 | Variable | Required? | How to get / set |
 |----------|-----------|------------------|
-| `DATABASE_URL` | 🔴 | Local: `postgresql://postgres:PASSWORD@localhost:5432/calendarsync_app`. Railway: add Postgres plugin → reference its `DATABASE_URL` |
+| `DATABASE_URL` | 🔴 | Local: `postgresql://postgres:PASSWORD@localhost:5432/calendarsync_app`. Supabase: pooled URL (port 6543) — see §7b |
+| `DIRECT_URL` | 🔴 | Local: same as `DATABASE_URL`. Supabase: direct URL (port 5432) — see §7b |
 | `ENCRYPTION_KEY` | 🔴 | Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` → 64-char hex string |
 | `JWT_SECRET` | 🔴 | Generate with: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` |
 | `SESSION_SECRET` | 🔴 | Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+
+### 7b. Supabase (recommended database — free tier, daily backups, web SQL editor)
+
+**Why Supabase over Railway's Postgres:**
+- Free tier includes daily backups with 7-day retention (Railway free Postgres has no backups)
+- Built-in connection pooler (PgBouncer) — handles serverless and high-concurrency
+- Web SQL editor, table viewer, real-time monitoring
+- One-click Point-in-Time Recovery on paid plans
+- 500 MB free (enough for tens of thousands of events)
+- The Prisma code doesn't change — it's still Postgres
+
+**Step-by-step:**
+
+1. **Sign up** at [supabase.com](https://supabase.com) (GitHub login).
+2. **New project**:
+   - Name: `calendarsync-prod`
+   - Database password: **generate a strong one and save it** (you'll need it below — Supabase will NOT show it again)
+   - Region: pick the one closest to your Railway region (e.g. both `us-east`)
+   - Pricing plan: Free
+   - Click **Create new project** — provisioning takes ~2 minutes
+3. **Get the two connection strings**:
+   - Project dashboard → click **Connect** (top right) → **ORM** tab → **Prisma**
+   - You'll see two URIs. Copy both:
+
+     **Transaction pooler** (for `DATABASE_URL`) — port `6543`, with `?pgbouncer=true`:
+     ```
+     postgresql://postgres.xxxxx:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+     ```
+
+     **Direct connection** (for `DIRECT_URL`) — port `5432`:
+     ```
+     postgresql://postgres.xxxxx:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:5432/postgres
+     ```
+   - Replace `[YOUR-PASSWORD]` in both with the password from step 2.
+
+4. **Why two URLs?** Prisma migrations need a real session (not pooled). The runtime app uses pooling for performance. The schema already declares both via `directUrl` — `prisma migrate deploy` automatically picks the right one.
+
+5. **Set these in Railway** backend service → Variables:
+   - `DATABASE_URL` = the **pooled** URL (port 6543)
+   - `DIRECT_URL` = the **direct** URL (port 5432)
+   - Remove the Railway Postgres reference if you had one
+   - You can **delete the Railway Postgres plugin** to save resources — Supabase replaces it entirely
+
+6. **First deploy**: Railway runs `prisma migrate deploy` on container boot — it uses `DIRECT_URL`, creates all tables in Supabase. Verify in Supabase dashboard → Table Editor — you should see `users`, `calendars`, `events`, etc.
+
+7. **Backups** (automatic on Supabase): Project Settings → Database → Backups. Free tier = daily backups, 7-day retention. Click any to download or restore.
+
+**Common Supabase issues:**
+
+| Issue | Fix |
+|-------|-----|
+| `prepared statement "sX" already exists` at runtime | The pooled URL is missing `?pgbouncer=true` — add it |
+| `prisma migrate deploy` fails: "cannot create prepared statement" | You set `DATABASE_URL` to the pooled URL but forgot `DIRECT_URL` — set both |
+| `connection refused` | Wrong region in the URL, or the project is paused (Supabase pauses free projects after 1 week of inactivity — just open the dashboard to wake it) |
+| `password authentication failed` | The `[YOUR-PASSWORD]` placeholder wasn't replaced |
+
+**Important:** Supabase free projects **pause after 7 days of inactivity**. If your app is truly idle (no traffic), it pauses and the next request wakes it (~10s delay). For guaranteed always-on, upgrade to Pro ($25/mo) — but for an enterprise app with regular calendar webhook traffic, you'll never hit the inactivity threshold.
 
 ### Redis
 | Variable | Required? | How to get / set |
@@ -334,13 +392,14 @@ SMTP_FROM=verified-sender@yourdomain.com
 2. Go to **[railway.app](https://railway.app)** → New Project → **Deploy from GitHub** → pick `calendarSyncGentec`.
 3. **Set Root Directory** (critical):
    - Click the service → Settings → Source → **Root Directory** = `backend` → Save
-4. **Add Postgres**: `+ New` → Database → Add PostgreSQL.
+4. **Database** — pick one:
+   - **Recommended: Supabase** (see §7b). Do NOT add Railway's Postgres plugin. Paste `DATABASE_URL` (pooled, port 6543) + `DIRECT_URL` (direct, port 5432) from Supabase as plain values into Railway's Variables.
+   - Alternative: Railway Postgres → `+ New` → Database → Add PostgreSQL → reference its `DATABASE_URL`, and set `DIRECT_URL` to the same value.
 5. **Add Redis**: `+ New` → Database → Add Redis.
-6. **Link variables** to the backend service → Variables tab:
-   - `+ New Variable` → Add Reference → Postgres → `DATABASE_URL`
-   - Same for Redis → `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
-7. **Add the 4 required secrets** (copy from your local `backend/.env`):
-   - `ENCRYPTION_KEY`, `JWT_SECRET`, `SESSION_SECRET`, plus `NODE_ENV=production`
+6. **Link Redis variables** to the backend service → Variables tab:
+   - `+ New Variable` → Add Reference → Redis → `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
+7. **Add the 5 required secrets** (copy from your local `backend/.env`):
+   - `DATABASE_URL`, `DIRECT_URL`, `ENCRYPTION_KEY`, `JWT_SECRET`, `SESSION_SECRET`, plus `NODE_ENV=production`
 8. **Deploy** — Railway auto-builds the Dockerfile. The container:
    - Runs `prisma migrate deploy` (creates all tables) → starts the server.
    - Healthcheck `/health` should turn green within ~60 seconds.
