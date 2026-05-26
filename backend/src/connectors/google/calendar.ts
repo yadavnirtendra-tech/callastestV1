@@ -288,7 +288,7 @@ export function googleEventToCanonical(
       isOptional: a.optional || false,
       isOrganizer: a.organizer || false,
     })),
-    recurrenceRule: googleEvent.recurrence ? googleRruleToCanonical(googleEvent.recurrence) : null,
+    recurrenceRule: (googleEvent.recurrence ? googleRruleToCanonical(googleEvent.recurrence) : null) as any,
     recurringEventId: googleEvent.recurringEventId || null,
     isRecurringInstance: !!googleEvent.recurringEventId,
     meetingLink: googleEvent.hangoutLink || googleEvent.conferenceData?.entryPoints?.[0]?.uri || '',

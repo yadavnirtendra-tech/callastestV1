@@ -269,7 +269,7 @@ export function microsoftEventToCanonical(msEvent: any, calendarId: string): Par
       isOptional: a.type === 'optional',
       isOrganizer: false,
     })),
-    recurrenceRule: msEvent.recurrence ? microsoftRecurrenceToCanonical(msEvent.recurrence) : null,
+    recurrenceRule: (msEvent.recurrence ? microsoftRecurrenceToCanonical(msEvent.recurrence) : null) as any,
     meetingLink: msEvent.onlineMeeting?.joinUrl || msEvent.onlineMeetingUrl || '',
     etag: msEvent['@odata.etag'] || '',
     lastModifiedAt: new Date(msEvent.lastModifiedDateTime || Date.now()),
