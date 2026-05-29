@@ -177,7 +177,7 @@ router.get('/google/callback', optionalAuth, async (req: Request, res: Response)
     res.cookie('token', jwt, {
       httpOnly: true,
       secure: config.isProd,
-      sameSite: 'lax',
+      sameSite: config.isProd ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -362,7 +362,7 @@ router.get('/microsoft/callback', optionalAuth, async (req: Request, res: Respon
     res.cookie('token', jwt, {
       httpOnly: true,
       secure: config.isProd,
-      sameSite: 'lax',
+      sameSite: config.isProd ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -436,7 +436,7 @@ router.post('/register', authRateLimiter, async (req: Request, res: Response) =>
     res.cookie('token', jwt, {
       httpOnly: true,
       secure: config.isProd,
-      sameSite: 'lax',
+      sameSite: config.isProd ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -508,7 +508,7 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
     res.cookie('token', jwt, {
       httpOnly: true,
       secure: config.isProd,
-      sameSite: 'lax',
+      sameSite: config.isProd ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     });
 
