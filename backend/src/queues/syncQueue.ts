@@ -67,7 +67,7 @@ export function initializeQueues(): void {
   }
 
   try {
-    syncQueue = new Queue('sync-jobs', { connection });
+    syncQueue = new Queue('sync-jobs', { connection: connection as any });
 
     syncWorker = new Worker(
       'sync-jobs',
@@ -77,7 +77,7 @@ export function initializeQueues(): void {
         await processSyncWebhook(userId, calendarId, provider);
       },
       {
-        connection,
+        connection: connection as any,
         concurrency: config.sync.maxConcurrentSyncs,
       }
     );
