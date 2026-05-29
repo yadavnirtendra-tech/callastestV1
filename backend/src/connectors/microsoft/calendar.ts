@@ -43,34 +43,38 @@ export async function getMicrosoftGraphClient(userId: string): Promise<Client> {
     },
   });
 
-  if (!user?.microsoftAccessToken || !user?.microsoftRefreshToken) {
+  if (!user?.microsoftAccessToken) {
     throw new Error('Microsoft account not connected');
   }
 
   let accessToken = decrypt(user.microsoftAccessToken);
 
-  // Refresh if expired
+  // Refresh if expired (only if refresh token is available)
   if (user.microsoftTokenExpiresAt && new Date() >= user.microsoftTokenExpiresAt) {
-    syncLogger.info({ userId }, 'Refreshing expired Microsoft token');
-    try {
-      const result = await msalApp.acquireTokenByRefreshToken({
-        refreshToken: decrypt(user.microsoftRefreshToken),
-        scopes: [...config.microsoft.scopes],
-      });
-
-      if (result) {
-        accessToken = result.accessToken;
-        await db.user.update({
-          where: { id: userId },
-          data: {
-            microsoftAccessToken: encrypt(result.accessToken),
-            microsoftTokenExpiresAt: result.expiresOn || new Date(Date.now() + 3600000),
-          },
+    if (user.microsoftRefreshToken) {
+      syncLogger.info({ userId }, 'Refreshing expired Microsoft token');
+      try {
+        const result = await msalApp.acquireTokenByRefreshToken({
+          refreshToken: decrypt(user.microsoftRefreshToken),
+          scopes: [...config.microsoft.scopes],
         });
+
+        if (result) {
+          accessToken = result.accessToken;
+          await db.user.update({
+            where: { id: userId },
+            data: {
+              microsoftAccessToken: encrypt(result.accessToken),
+              microsoftTokenExpiresAt: result.expiresOn || new Date(Date.now() + 3600000),
+            },
+          });
+        }
+      } catch (error) {
+        syncLogger.error({ userId, error }, 'Failed to refresh Microsoft token');
+        throw new Error('Microsoft token refresh failed — user needs to re-authenticate');
       }
-    } catch (error) {
-      syncLogger.error({ userId, error }, 'Failed to refresh Microsoft token');
-      throw new Error('Microsoft token refresh failed — user needs to re-authenticate');
+    } else {
+      syncLogger.warn({ userId }, 'Microsoft token expired and no refresh token is stored');
     }
   }
 

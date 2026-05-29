@@ -9,9 +9,9 @@ import { Router, Request, Response } from 'express';
 import getDatabase from '../database/client';
 import { webhookLogger } from '../utils/logger';
 import { logAuditEvent } from '../audit/logger';
-import { processSyncWebhook } from '../sync/orchestrator';
 import { secureCompare, generateSecureToken } from '../crypto/encryption';
 import { AuditAction, AuditResourceType, AuditSource, CalendarProvider } from '../types';
+import { addSyncJob } from '../queues/syncQueue';
 
 const router = Router();
 
@@ -77,14 +77,12 @@ router.post('/google', async (req: Request, res: Response) => {
       source: AuditSource.WEBHOOK,
     });
 
-    // Process sync asynchronously
-    processSyncWebhook(
+    // Add sync job to background queue
+    addSyncJob(
       subscription.calendar.userId,
       subscription.calendar.id,
       CalendarProvider.GOOGLE
-    ).catch(error => {
-      webhookLogger.error({ error, channelId }, 'Google sync processing failed');
-    });
+    );
 
   } catch (error) {
     webhookLogger.error({ error }, 'Google webhook handler error');
@@ -138,9 +136,11 @@ router.post('/microsoft', async (req: Request, res: Response) => {
       }
 
       // Verify client state (prevents spoofed webhooks)
-      if (clientState && subscription.clientState && clientState !== subscription.clientState) {
-        webhookLogger.warn({ subscriptionId }, 'Microsoft webhook clientState mismatch — potential spoofing');
-        continue;
+      if (subscription.clientState) {
+        if (!clientState || clientState !== subscription.clientState) {
+          webhookLogger.warn({ subscriptionId }, 'Microsoft webhook clientState mismatch — potential spoofing');
+          continue;
+        }
       }
 
       await logAuditEvent({
@@ -152,14 +152,12 @@ router.post('/microsoft', async (req: Request, res: Response) => {
         source: AuditSource.WEBHOOK,
       });
 
-      // Process sync asynchronously
-      processSyncWebhook(
+      // Add sync job to background queue
+      addSyncJob(
         subscription.calendar.userId,
         subscription.calendar.id,
         CalendarProvider.MICROSOFT
-      ).catch(error => {
-        webhookLogger.error({ error, subscriptionId }, 'Microsoft sync processing failed');
-      });
+      );
     }
   } catch (error) {
     webhookLogger.error({ error }, 'Microsoft webhook handler error');

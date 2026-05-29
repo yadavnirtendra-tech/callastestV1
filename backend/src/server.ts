@@ -28,8 +28,10 @@ import authRoutes from './routes/auth';
 import webhookRoutes from './routes/webhooks';
 import adminRoutes from './routes/admin';
 import healthRoutes from './routes/health';
+import eventsRoutes from './routes/events';
 import { startWebhookRenewalService, stopWebhookRenewalService } from './sync/webhookRenewal';
 import { startNotificationWorker, stopNotificationWorker } from './notifications/worker';
+import { initializeQueues, shutdownQueues } from './queues/syncQueue';
 
 const app = express();
 
@@ -80,6 +82,9 @@ app.use('/auth', authRoutes);
 // Webhook routes — receive notifications from Google/Microsoft
 app.use('/webhooks', webhookRoutes);
 
+// Events API — protected user events CRUD
+app.use('/api/events', eventsRoutes);
+
 // Admin API — requires ADMIN role
 app.use('/api/admin', adminRoutes);
 
@@ -125,6 +130,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 // ============================================================
 
 const server = app.listen(config.port, config.host, () => {
+  // Initialize BullMQ queues
+  initializeQueues();
   // Start webhook auto-renewal (runs every 6h, no ngrok needed)
   startWebhookRenewalService();
   // Start email notification worker (polls every 30s)
@@ -160,6 +167,7 @@ async function gracefulShutdown(signal: string) {
 
   stopWebhookRenewalService();
   stopNotificationWorker();
+  await shutdownQueues();
   server.close(async () => {
     await disconnectDatabase();
     logger.info('Server shut down complete');

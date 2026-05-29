@@ -27,6 +27,7 @@ model User {
   email                       String    @unique @db.VarChar(255)
   displayName                 String    @db.VarChar(255)
   role                        UserRole  @default(USER)
+  passwordHash                String?   @db.Text
   
   // OAuth tokens — AES-256-GCM encrypted at app layer
   googleAccessToken           String?   @db.Text

@@ -7,6 +7,7 @@
 
 import getDatabase from '../database/client';
 import { conflictLogger } from '../utils/logger';
+import { getAvailableSlots } from './detector';
 import { logAuditEvent } from '../audit/logger';
 import { queueNotification } from '../notifications/dispatcher';
 import { CanonicalEvent, ConflictDetectionResult, AuditAction, AuditResourceType, AuditSource } from '../types';
@@ -56,13 +57,16 @@ export async function handleAutoRejection(
       },
     });
 
+    // Fetch up to 3 upcoming free slots to suggest in the rejection email
+    const freeSlots = await getAvailableSlots(userId);
+
     // 2. Queue rejection email
     await queueNotification({
       userId,
       type: 'rejection',
       channel: 'email',
       subject: `Meeting Declined: ${event.title || 'Untitled Event'}`,
-      body: buildRejectionEmailBody(event, conflictResult),
+      body: buildRejectionEmailBody(event, conflictResult, freeSlots),
       metadata: {
         eventTitle: event.title,
         organizerEmail: event.organizerEmail,
@@ -108,37 +112,44 @@ function buildRejectionReason(result: ConflictDetectionResult): string {
   return `The requested meeting conflicts with an existing calendar commitment (${conflict.overlapMinutes} minutes overlap with "${conflict.existingEvent.title}")`;
 }
 
-function buildRejectionEmailBody(event: Partial<CanonicalEvent>, result: ConflictDetectionResult): string {
+function buildRejectionEmailBody(
+  event: Partial<CanonicalEvent>,
+  result: ConflictDetectionResult,
+  freeSlots: string[]
+): string {
   const conflict = result.conflicts[0];
   const startStr = event.startTime ? new Date(event.startTime).toLocaleString() : 'Unknown';
   const endStr = event.endTime ? new Date(event.endTime).toLocaleString() : 'Unknown';
 
+  const slotsListHtml = freeSlots.length > 0
+    ? `
+      <p style="color: #b0b0b0; margin-top: 20px;">However, I would love to connect. I am currently free at any of these upcoming times:</p>
+      <ul style="color: #667eea; padding-left: 20px; margin: 10px 0;">
+        ${freeSlots.map(slot => `<li style="margin: 6px 0;"><strong>${slot}</strong></li>`).join('')}
+      </ul>
+      <p style="color: #b0b0b0;">Please let me know if any of these options work for you, or feel free to suggest another time!</p>
+    `
+    : `
+      <p style="color: #b0b0b0; margin-top: 20px;">I apologize for the inconvenience. Please feel free to suggest some alternative times next week that might work for you.</p>
+    `;
+
   return `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px 12px 0 0; color: white;">
-        <h2 style="margin: 0; font-size: 20px;">📅 Meeting Automatically Declined</h2>
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0f111a; border-radius: 12px; border: 1px solid #1e2130;">
+      <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 24px; border-radius: 8px 8px 0 0; color: white; text-align: center;">
+        <h2 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.5px;">📅 Meeting Invitation Decline</h2>
       </div>
-      <div style="background: #1a1a2e; color: #e0e0e0; padding: 24px; border-radius: 0 0 12px 12px;">
-        <p style="color: #b0b0b0; margin-top: 0;">The following meeting request has been automatically declined by the scheduling system:</p>
-        
-        <div style="background: #16213e; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p style="margin: 4px 0;"><strong style="color: #667eea;">Meeting:</strong> ${event.title || 'Untitled'}</p>
-          <p style="margin: 4px 0;"><strong style="color: #667eea;">Time:</strong> ${startStr} — ${endStr}</p>
-          <p style="margin: 4px 0;"><strong style="color: #667eea;">Organizer:</strong> ${event.organizerEmail || 'Unknown'}</p>
-        </div>
-
-        <div style="background: #2d1b35; border-left: 4px solid #e74c3c; padding: 12px; border-radius: 4px; margin: 16px 0;">
-          <p style="margin: 0; color: #e74c3c;"><strong>Reason:</strong></p>
-          <p style="margin: 8px 0 0 0; color: #d0d0d0;">
-            The requested meeting conflicts with an existing calendar commitment
-            ${conflict ? ` and has a ${conflict.overlapMinutes}-minute overlap` : ''}.
-          </p>
-        </div>
-
-        <p style="color: #888; font-size: 12px; margin-top: 20px; border-top: 1px solid #333; padding-top: 12px;">
-          This action was performed automatically by the Enterprise Calendar Sync system.
-          Contact your administrator if you believe this was an error.
+      <div style="background: #0f111a; color: #e4e6eb; padding: 24px; border-radius: 0 0 8px 8px;">
+        <p style="color: #e4e6eb; margin-top: 0; font-size: 15px; line-height: 1.5;">Hi,</p>
+        <p style="color: #e4e6eb; font-size: 15px; line-height: 1.5;">
+          Thank you for the invitation to <strong>"${event.title || 'Untitled'}"</strong>. 
+          Unfortunately, I am not available at the proposed time of <strong>${startStr}</strong> because it conflicts with a prior calendar commitment.
         </p>
+        
+        ${slotsListHtml}
+
+        <div style="border-top: 1px solid #1e2130; margin-top: 24px; padding-top: 16px; font-size: 12px; color: #8f9bb3; line-height: 1.4;">
+          <p style="margin: 0;"><em>This notification was sent automatically by CalendarSync on behalf of the user.</em></p>
+        </div>
       </div>
     </div>
   `;
