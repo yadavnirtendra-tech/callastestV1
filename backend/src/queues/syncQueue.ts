@@ -25,9 +25,9 @@ export function getRedisConnection(): Redis | null {
   const url = config.redis.url;
   const host = config.redis.host;
 
-  // In local dev, if REDIS_URL is not set and host is default, bypass Redis
-  // to avoid forcing the user to run local Redis, maintaining ease of use.
-  if (!url && config.isDev && host === 'localhost') {
+  // If REDIS_URL is not set and host is localhost, bypass Redis to avoid connection error loops.
+  // The app will gracefully fall back to the in-memory queue.
+  if (!url && host === 'localhost') {
     return null;
   }
 
