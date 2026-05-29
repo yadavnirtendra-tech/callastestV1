@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "env": {
-    "NEXT_PUBLIC_API_URL": "https://YOUR-RAILWAY-APP-URL.railway.app"
+    "NEXT_PUBLIC_API_URL": "https://callastestv1-production.up.railway.app"
   },
   "headers": [
     {
