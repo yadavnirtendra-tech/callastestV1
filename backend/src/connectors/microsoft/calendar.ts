@@ -197,7 +197,7 @@ export async function createMicrosoftSubscription(
   userId: string,
   calendarId: string,
   webhookUrl: string
-): Promise<{ subscriptionId: string; expiration: Date }> {
+): Promise<{ subscriptionId: string; expiration: Date; clientState: string }> {
   const client = await getMicrosoftGraphClient(userId);
   const clientState = uuidv4();
 
@@ -212,6 +212,7 @@ export async function createMicrosoftSubscription(
   return {
     subscriptionId: response.id,
     expiration: new Date(response.expirationDateTime),
+    clientState,
   };
 }
 

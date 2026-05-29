@@ -329,6 +329,7 @@ router.get('/microsoft/callback', optionalAuth, async (req: Request, res: Respon
           update: {
             expiresAt: watch.expiration,
             status: 'ACTIVE',
+            clientState: watch.clientState,
           },
           create: {
             calendarId: calendarRecord.id,
@@ -337,6 +338,7 @@ router.get('/microsoft/callback', optionalAuth, async (req: Request, res: Respon
             webhookUrl,
             expiresAt: watch.expiration,
             status: 'ACTIVE',
+            clientState: watch.clientState,
           },
         });
       }
