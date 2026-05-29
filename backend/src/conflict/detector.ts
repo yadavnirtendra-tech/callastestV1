@@ -223,7 +223,7 @@ export async function checkForConflicts(
         },
       });
 
-      const focusEvents = candidateFocusEvents.filter(ev => {
+      const focusEvents = candidateFocusEvents.filter((ev: any) => {
         try {
           const titleDecrypted = decrypt(ev.title);
           return titleDecrypted.toLowerCase().includes('focus');
