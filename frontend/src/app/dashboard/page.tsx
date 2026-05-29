@@ -168,6 +168,36 @@ export default function DashboardPage() {
     router.push('/');
   }
 
+  async function handleDisconnect(provider: 'google' | 'microsoft') {
+    const providerName = provider === 'google' ? 'Google Calendar' : 'Microsoft Outlook';
+    if (!confirm(`Are you sure you want to disconnect your ${providerName}? This will delete all synced events from our platform and stop real-time synchronization.`)) {
+      return;
+    }
+    
+    try {
+      const res = await fetch(`${API_BASE}/auth/disconnect/${provider}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`${providerName} disconnected successfully.`);
+        // Refresh session to update user connected states
+        await fetchSession();
+        // Also refresh calendar events and stats since events were deleted
+        fetchUserEvents();
+        if (session?.role === 'ADMIN') {
+          fetchAdminStats();
+        }
+      } else {
+        alert(data.error?.message || `Failed to disconnect ${providerName}.`);
+      }
+    } catch (error) {
+      console.error('Disconnect failed:', error);
+      alert(`Failed to disconnect ${providerName} due to a network error.`);
+    }
+  }
+
   // Handle Event Creation
   async function handleCreateEvent(e: React.FormEvent) {
     e.preventDefault();
@@ -700,7 +730,9 @@ export default function DashboardPage() {
                   )}
                 </div>
               </div>
-              {!session?.googleConnected && (
+              {session?.googleConnected ? (
+                <button onClick={() => handleDisconnect('google')} className="btn btn-danger btn-sm">Disconnect</button>
+              ) : (
                 <a href={`${API_BASE}/auth/google`} className="btn btn-ghost btn-sm">Connect</a>
               )}
             </div>
@@ -717,7 +749,9 @@ export default function DashboardPage() {
                   )}
                 </div>
               </div>
-              {!session?.microsoftConnected && (
+              {session?.microsoftConnected ? (
+                <button onClick={() => handleDisconnect('microsoft')} className="btn btn-danger btn-sm">Disconnect</button>
+              ) : (
                 <a href={`${API_BASE}/auth/microsoft`} className="btn btn-ghost btn-sm">Connect</a>
               )}
             </div>

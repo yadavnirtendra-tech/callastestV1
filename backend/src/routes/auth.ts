@@ -10,13 +10,13 @@ import bcrypt from 'bcryptjs';
 import config from '../config';
 import getDatabase from '../database/client';
 import { encrypt } from '../crypto/encryption';
-import { generateJWT, optionalAuth } from '../middleware/auth';
+import { generateJWT, optionalAuth, authenticateToken } from '../middleware/auth';
 import { logAuditEvent } from '../audit/logger';
 import { authLogger } from '../utils/logger';
 import { AuditAction, AuditResourceType, AuditSource } from '../types';
 import { authRateLimiter } from '../middleware/security';
-import { watchGoogleCalendar } from '../connectors/google/calendar';
-import { createMicrosoftSubscription } from '../connectors/microsoft/calendar';
+import { watchGoogleCalendar, stopGoogleWatch } from '../connectors/google/calendar';
+import { createMicrosoftSubscription, deleteMicrosoftSubscription } from '../connectors/microsoft/calendar';
 
 const router = Router();
 
@@ -571,6 +571,126 @@ router.get('/session', async (req: Request, res: Response) => {
 router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie('token');
   res.json({ success: true, data: { message: 'Logged out successfully' } });
+});
+
+/** Disconnect Google Calendar */
+router.post('/disconnect/google', authenticateToken, async (req: Request, res: Response) => {
+  const userId = req.user!.sub;
+  const db = getDatabase();
+
+  try {
+    const calendar = await db.calendar.findFirst({
+      where: { userId, provider: 'GOOGLE', isPrimary: true },
+      include: { webhookSubscriptions: true },
+    });
+
+    if (calendar) {
+      // 1. Stop webhook subscriptions
+      for (const sub of calendar.webhookSubscriptions) {
+        try {
+          await stopGoogleWatch(sub.channelId, sub.resourceId, userId);
+        } catch (err) {
+          authLogger.error({ userId, channelId: sub.channelId, err }, 'Failed to stop Google webhook watch during disconnect');
+        }
+      }
+
+      // 2. Delete Calendar (Cascade deletes events and webhook subscriptions)
+      await db.calendar.delete({
+        where: { id: calendar.id },
+      });
+    }
+
+    // 3. Clear Google OAuth tokens on User
+    await db.user.update({
+      where: { id: userId },
+      data: {
+        googleConnected: false,
+        googleAccessToken: null,
+        googleRefreshToken: null,
+        googleTokenExpiresAt: null,
+      },
+    });
+
+    // 4. Log Audit Event
+    await logAuditEvent({
+      userId,
+      action: AuditAction.USER_UPDATED,
+      resourceType: AuditResourceType.USER,
+      resourceId: userId,
+      newValue: { provider: 'google', action: 'disconnect' },
+      ipAddress: req.ip || '0.0.0.0',
+      userAgent: req.headers['user-agent'] || '',
+      source: AuditSource.USER,
+    });
+
+    res.json({ success: true, data: { message: 'Google Calendar disconnected successfully' } });
+  } catch (error) {
+    authLogger.error({ userId, error }, 'Failed to disconnect Google Calendar');
+    res.status(500).json({
+      success: false,
+      error: { code: 'DISCONNECT_FAILED', message: 'Failed to disconnect Google Calendar' },
+    });
+  }
+});
+
+/** Disconnect Microsoft Outlook Calendar */
+router.post('/disconnect/microsoft', authenticateToken, async (req: Request, res: Response) => {
+  const userId = req.user!.sub;
+  const db = getDatabase();
+
+  try {
+    const calendar = await db.calendar.findFirst({
+      where: { userId, provider: 'MICROSOFT', isPrimary: true },
+      include: { webhookSubscriptions: true },
+    });
+
+    if (calendar) {
+      // 1. Stop webhook subscriptions
+      for (const sub of calendar.webhookSubscriptions) {
+        try {
+          await deleteMicrosoftSubscription(userId, sub.channelId);
+        } catch (err) {
+          authLogger.error({ userId, subscriptionId: sub.channelId, err }, 'Failed to delete Microsoft subscription during disconnect');
+        }
+      }
+
+      // 2. Delete Calendar (Cascade deletes events and webhook subscriptions)
+      await db.calendar.delete({
+        where: { id: calendar.id },
+      });
+    }
+
+    // 3. Clear Microsoft OAuth tokens on User
+    await db.user.update({
+      where: { id: userId },
+      data: {
+        microsoftConnected: false,
+        microsoftAccessToken: null,
+        microsoftRefreshToken: null,
+        microsoftTokenExpiresAt: null,
+      },
+    });
+
+    // 4. Log Audit Event
+    await logAuditEvent({
+      userId,
+      action: AuditAction.USER_UPDATED,
+      resourceType: AuditResourceType.USER,
+      resourceId: userId,
+      newValue: { provider: 'microsoft', action: 'disconnect' },
+      ipAddress: req.ip || '0.0.0.0',
+      userAgent: req.headers['user-agent'] || '',
+      source: AuditSource.USER,
+    });
+
+    res.json({ success: true, data: { message: 'Microsoft Calendar disconnected successfully' } });
+  } catch (error) {
+    authLogger.error({ userId, error }, 'Failed to disconnect Microsoft Calendar');
+    res.status(500).json({
+      success: false,
+      error: { code: 'DISCONNECT_FAILED', message: 'Failed to disconnect Microsoft Calendar' },
+    });
+  }
 });
 
 export default router;

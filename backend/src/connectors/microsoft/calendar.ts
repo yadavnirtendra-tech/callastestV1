@@ -99,7 +99,14 @@ export async function listMicrosoftEvents(
     let resultDeltaLink: string | null = null;
 
     // Use delta link for incremental sync, or start fresh
-    let url = deltaLink || `/me/calendars/${calendarId}/events/delta`;
+    let url = deltaLink;
+    if (!url) {
+      // Initial sync — fetch only future events for the next 30 days using calendarView/delta (no past sync)
+      const now = new Date();
+      const startDateTime = now.toISOString();
+      const endDateTime = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      url = `/me/calendars/${calendarId}/calendarView/delta?startDateTime=${startDateTime}&endDateTime=${endDateTime}`;
+    }
 
     do {
       const response = await client.api(url).get();
@@ -220,6 +227,19 @@ export async function renewMicrosoftSubscription(userId: string, subscriptionId:
   });
 
   return newExpiration;
+}
+
+/**
+ * Delete a Microsoft webhook subscription.
+ */
+export async function deleteMicrosoftSubscription(userId: string, subscriptionId: string): Promise<void> {
+  try {
+    const client = await getMicrosoftGraphClient(userId);
+    await client.api(`/subscriptions/${subscriptionId}`).delete();
+    syncLogger.info({ userId, subscriptionId }, 'Deleted Microsoft subscription');
+  } catch (err) {
+    syncLogger.error({ userId, subscriptionId, err }, 'Failed to delete Microsoft subscription');
+  }
 }
 
 /**
