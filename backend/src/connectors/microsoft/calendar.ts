@@ -109,7 +109,9 @@ export async function listMicrosoftEvents(
     }
 
     do {
-      const response = await client.api(url).get();
+      const response = await client.api(url)
+        .header('Prefer', 'outlook.timezone="UTC"')
+        .get();
       if (response.value) allEvents.push(...response.value);
       nextLink = response['@odata.nextLink'];
       resultDeltaLink = response['@odata.deltaLink'] || null;
