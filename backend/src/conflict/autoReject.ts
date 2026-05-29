@@ -32,11 +32,16 @@ export async function handleAutoRejection(
       return;
     }
     const mainConflict = conflictResult.conflicts[0];
+
+    // Validate eventId — synthetic IDs like 'google-busy', 'microsoft-busy', 'incoming'
+    // are NOT real DB UUIDs and would cause an FK constraint violation.
+    const SYNTHETIC_IDS = new Set(['incoming', 'google-busy', 'microsoft-busy']);
+    const rawEventId = mainConflict.existingEvent?.eventId;
+    const safeEventId = (rawEventId && !SYNTHETIC_IDS.has(rawEventId)) ? rawEventId : uuidv4();
+
     await db.conflictLog.create({
       data: {
-        eventId: mainConflict.existingEvent?.eventId && mainConflict.existingEvent.eventId !== 'incoming'
-          ? mainConflict.existingEvent.eventId
-          : uuidv4(),
+        eventId: safeEventId,
         userId,
         conflictType: mainConflict?.type?.toUpperCase() as any || 'TIME_OVERLAP',
         resolution: 'AUTO_REJECTED',
@@ -45,6 +50,7 @@ export async function handleAutoRejection(
           incomingStart: event.startTime,
           incomingEnd: event.endTime,
           incomingOrganizer: event.organizerEmail,
+          syntheticId: SYNTHETIC_IDS.has(rawEventId || '') ? rawEventId : undefined,
           conflicts: conflictResult.conflicts.map(c => ({
             existingTitle: c.existingEvent.title,
             existingStart: c.existingEvent.startTime,

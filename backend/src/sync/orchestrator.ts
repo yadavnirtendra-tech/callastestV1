@@ -246,6 +246,8 @@ async function processEventChange(
     isOrganizer: normalizedEvent.isOrganizer || false,
     attendees: JSON.stringify(normalizedEvent.attendees || []),
     recurrenceRule: (normalizedEvent.recurrenceRule as any) || undefined,
+    recurringEventId: normalizedEvent.recurringEventId || null,
+    isRecurringInstance: normalizedEvent.isRecurringInstance || false,
     meetingLink: normalizedEvent.meetingLink || '',
     syncState: mirrorEventId ? 'SYNCED' as const : 'PENDING' as const,
     conflictState: conflictResult.hasConflict ? 'DETECTED' as const : 'NONE' as const,

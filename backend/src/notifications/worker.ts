@@ -43,13 +43,19 @@ async function processQueue(): Promise<void> {
   for (const notification of pending) {
     try {
       if (notification.channel === 'email') {
-        const recipientEmail = notification.user?.email;
+        const meta = notification.metadata as any;
+
+        // For rejection notifications, send to the meeting ORGANIZER, not the user
+        // For other notifications (reminders, etc.), send to the user
+        const recipientEmail = 
+          meta?.recipientEmail || 
+          (notification.type === 'rejection' ? meta?.organizerEmail : null) ||
+          notification.user?.email;
+
         if (!recipientEmail) {
           await failNotification(notification.id, 'No recipient email');
           continue;
         }
-
-        const meta = notification.metadata as any;
 
         // Use smart router — picks Gmail API, MS Graph, or SendGrid
         // based on user preference + which platform the event came from

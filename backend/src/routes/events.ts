@@ -13,7 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { generateSyncFingerprint, generateIdempotencyKey } from '../sync/fingerprint';
 import { logAuditEvent } from '../audit/logger';
 import { AuditAction, AuditResourceType, AuditSource } from '../types';
-import { getAvailableSlots } from '../conflict/detector';
+import { getAvailableSlots, checkForConflicts } from '../conflict/detector';
 import { queueNotification } from '../notifications/dispatcher';
 
 const router = Router();
@@ -132,6 +132,23 @@ router.post('/', async (req: Request, res: Response) => {
       res.status(400).json({
         success: false,
         error: { code: 'NO_CALENDAR_SELECTED', message: 'Must select at least one calendar to sync (Google or Outlook)' },
+      });
+      return;
+    }
+
+    // Conflict detection — check BOTH calendars before creating
+    const conflictResult = await checkForConflicts(userId, new Date(startTime), new Date(endTime));
+    if (conflictResult.hasConflict && conflictResult.recommendation === 'auto_reject') {
+      const conflictTitles = conflictResult.conflicts
+        .map(c => `"${c.existingEvent.title}" (${new Date(c.existingEvent.startTime).toLocaleTimeString()} - ${new Date(c.existingEvent.endTime).toLocaleTimeString()}, ${c.overlapMinutes}min overlap)`)
+        .join(', ');
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'CONFLICT_DETECTED',
+          message: `This time slot conflicts with existing events: ${conflictTitles}. Please choose a different time.`,
+          conflicts: conflictResult.conflicts,
+        },
       });
       return;
     }
@@ -437,8 +454,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
       } catch (err) {}
     }
 
-    // Delete in DB
-    await db.event.delete({ where: { id } });
+    // Delete in DB (safe — no crash if already removed)
+    await db.event.deleteMany({ where: { id } });
 
     await logAuditEvent({
       userId,
@@ -517,8 +534,8 @@ router.post('/:id/decline', async (req: Request, res: Response) => {
       } catch (err) {}
     }
 
-    // 2. Delete event locally
-    await db.event.delete({ where: { id } });
+    // 2. Delete event locally (safe — no crash if already removed)
+    await db.event.deleteMany({ where: { id } });
 
     // 3. Format email body based on custom message vs. automatic slot suggestions
     let emailBody = '';

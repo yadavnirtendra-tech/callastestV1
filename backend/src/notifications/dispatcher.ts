@@ -11,6 +11,7 @@ interface NotificationParams {
   channel: string;
   subject: string;
   body: string;
+  recipientEmail?: string; // Override: send to this email instead of the user's own email
   metadata?: Record<string, unknown>;
 }
 
@@ -29,7 +30,10 @@ export async function queueNotification(params: NotificationParams): Promise<str
       subject: params.subject,
       body: params.body,
       status: 'pending',
-      metadata: (params.metadata as any) || {},
+      metadata: {
+        ...(params.metadata as any || {}),
+        ...(params.recipientEmail ? { recipientEmail: params.recipientEmail } : {}),
+      },
     },
   });
 
