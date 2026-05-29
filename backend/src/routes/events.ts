@@ -15,6 +15,7 @@ import { logAuditEvent } from '../audit/logger';
 import { AuditAction, AuditResourceType, AuditSource } from '../types';
 import { getAvailableSlots, checkForConflicts } from '../conflict/detector';
 import { queueNotification } from '../notifications/dispatcher';
+import { addSyncJob } from '../queues/syncQueue';
 
 const router = Router();
 router.use(authenticateToken);
@@ -24,6 +25,17 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const userId = req.user!.sub;
+
+    // Trigger sync for all active calendars of the user in the background
+    const activeCalendars = await db.calendar.findMany({
+      where: { userId, syncEnabled: true },
+    });
+
+    for (const calendar of activeCalendars) {
+      addSyncJob(userId, calendar.id, calendar.provider).catch(err => {
+        console.error('Failed to trigger background sync job for calendar', calendar.id, err);
+      });
+    }
 
     const dbEvents = await db.event.findMany({
       where: {

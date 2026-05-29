@@ -17,6 +17,7 @@ import { AuditAction, AuditResourceType, AuditSource } from '../types';
 import { authRateLimiter } from '../middleware/security';
 import { watchGoogleCalendar, stopGoogleWatch } from '../connectors/google/calendar';
 import { createMicrosoftSubscription, deleteMicrosoftSubscription } from '../connectors/microsoft/calendar';
+import { addSyncJob } from '../queues/syncQueue';
 
 const router = Router();
 
@@ -155,6 +156,11 @@ router.get('/google/callback', optionalAuth, async (req: Request, res: Response)
     } catch (err) {
       authLogger.warn({ userId: user.id, err }, 'Failed to set up Google webhook watch');
     }
+
+    // Trigger initial sync job in background
+    addSyncJob(user.id, calendarRecord.id, 'GOOGLE').catch(err => {
+      authLogger.error({ userId: user.id, calendarId: calendarRecord.id, err }, 'Failed to trigger initial Google sync job');
+    });
 
     // Generate JWT
     const jwt = generateJWT({ id: user.id, email: user.email, role: user.role });
@@ -345,6 +351,11 @@ router.get('/microsoft/callback', optionalAuth, async (req: Request, res: Respon
     } catch (err) {
       authLogger.warn({ userId: user.id, err }, 'Failed to set up Microsoft webhook subscription');
     }
+
+    // Trigger initial sync job in background
+    addSyncJob(user.id, calendarRecord.id, 'MICROSOFT').catch(err => {
+      authLogger.error({ userId: user.id, calendarId: calendarRecord.id, err }, 'Failed to trigger initial Microsoft sync job');
+    });
 
     const jwt = generateJWT({ id: user.id, email: user.email, role: user.role });
 

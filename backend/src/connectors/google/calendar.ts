@@ -93,9 +93,9 @@ export async function listGoogleEvents(
     if (syncToken) {
       params.syncToken = syncToken;
     } else {
-      // Initial sync — fetch only future events for the next 30 days (no past sync)
+      // Initial sync — fetch events from 30 days in the past to 30 days in the future
       const now = new Date();
-      params.timeMin = now.toISOString();
+      params.timeMin = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
       params.timeMax = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
     }
 

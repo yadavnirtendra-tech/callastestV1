@@ -101,9 +101,9 @@ export async function listMicrosoftEvents(
     // Use delta link for incremental sync, or start fresh
     let url = deltaLink;
     if (!url) {
-      // Initial sync — fetch only future events for the next 30 days using calendarView/delta (no past sync)
+      // Initial sync — fetch events from 30 days in the past to 30 days in the future using calendarView/delta
       const now = new Date();
-      const startDateTime = now.toISOString();
+      const startDateTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const endDateTime = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
       url = `/me/calendars/${calendarId}/calendarView/delta?startDateTime=${startDateTime}&endDateTime=${endDateTime}`;
     }

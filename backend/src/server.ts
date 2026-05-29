@@ -32,6 +32,7 @@ import eventsRoutes from './routes/events';
 import { startWebhookRenewalService, stopWebhookRenewalService } from './sync/webhookRenewal';
 import { startNotificationWorker, stopNotificationWorker } from './notifications/worker';
 import { initializeQueues, shutdownQueues } from './queues/syncQueue';
+import { startPeriodicSyncService, stopPeriodicSyncService } from './sync/periodicSync';
 
 const app = express();
 
@@ -139,6 +140,8 @@ const server = app.listen(config.port, config.host, () => {
   startWebhookRenewalService();
   // Start email notification worker (polls every 30s)
   startNotificationWorker();
+  // Start periodic sync polling service (runs every 5m)
+  startPeriodicSyncService();
 
   logger.info(`
 ╔══════════════════════════════════════════════════════════╗
@@ -170,6 +173,7 @@ async function gracefulShutdown(signal: string) {
 
   stopWebhookRenewalService();
   stopNotificationWorker();
+  stopPeriodicSyncService();
   await shutdownQueues();
   server.close(async () => {
     await disconnectDatabase();

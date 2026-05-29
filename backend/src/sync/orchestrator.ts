@@ -120,11 +120,26 @@ async function processEventChange(
 
   // 2. LOOP PREVENTION — the most critical check
   const fingerprint = generateSyncFingerprint(normalizedEvent);
+  
+  // Find if event exists (either as source or mirror) under any of this user's calendars
   const existingEvent = await db.event.findFirst({
     where: {
-      calendarId: calendar.id,
-      sourceEventId,
-      sourcePlatform: sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT',
+      calendar: {
+        userId,
+      },
+      OR: [
+        {
+          sourceEventId,
+          sourcePlatform: sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT',
+        },
+        {
+          mirrorEventId: sourceEventId,
+          mirrorPlatform: sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT',
+        },
+      ],
+    },
+    include: {
+      calendar: true,
     },
   });
 
@@ -143,20 +158,6 @@ async function processEventChange(
         source: AuditSource.SYSTEM,
       });
       return;
-    }
-
-    // Check if this event IS the mirror of a previously synced event (second loop prevention layer)
-    if (existingEvent.mirrorEventId) {
-      const mirrorCheck = await db.event.findFirst({
-        where: {
-          mirrorEventId: sourceEventId,
-          sourcePlatform: targetProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT',
-        },
-      });
-      if (mirrorCheck && mirrorCheck.syncFingerprint === fingerprint) {
-        syncLogger.info({ userId, sourceEventId }, '🔄 LOOP PREVENTED — mirror fingerprint match');
-        return;
-      }
     }
   }
 
@@ -177,7 +178,15 @@ async function processEventChange(
 
   // 4. Handle deletion
   if (isCancelled) {
-    await handleEventDeletion(userId, calendar, existingEvent, targetProvider, idempotencyKey);
+    let targetEventIdToDelete: string | null = null;
+    if (existingEvent) {
+      if (existingEvent.sourcePlatform === (sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT')) {
+        targetEventIdToDelete = existingEvent.mirrorEventId;
+      } else {
+        targetEventIdToDelete = existingEvent.sourceEventId;
+      }
+    }
+    await handleEventDeletion(userId, calendar, existingEvent, targetProvider, idempotencyKey, targetEventIdToDelete);
     return;
   }
 
@@ -210,24 +219,65 @@ async function processEventChange(
     return;
   }
 
+  // Determine the targetEventId to update if updating
+  let targetEventId: string | null = null;
+  if (existingEvent) {
+    if (existingEvent.sourcePlatform === (sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT')) {
+      targetEventId = existingEvent.mirrorEventId;
+    } else {
+      targetEventId = existingEvent.sourceEventId;
+    }
+  }
+
   // 7. Create or update mirror event on target platform
   let mirrorEventId: string | null = null;
 
   if (action === 'create') {
     mirrorEventId = await createMirrorEvent(userId, targetCalendar, normalizedEvent as CanonicalEvent, targetProvider, fingerprint);
-  } else if (action === 'update' && existingEvent?.mirrorEventId) {
-    mirrorEventId = await updateMirrorEvent(userId, targetCalendar, existingEvent.mirrorEventId, normalizedEvent as CanonicalEvent, targetProvider, fingerprint);
+  } else if (action === 'update') {
+    if (targetEventId) {
+      mirrorEventId = await updateMirrorEvent(userId, targetCalendar, targetEventId, normalizedEvent as CanonicalEvent, targetProvider, fingerprint);
+    } else {
+      // Mirror event doesn't exist yet on target platform, let's create it!
+      mirrorEventId = await createMirrorEvent(userId, targetCalendar, normalizedEvent as CanonicalEvent, targetProvider, fingerprint);
+    }
   }
 
   // 8. Upsert the canonical event in our database
   const globalEventUuid = existingEvent?.globalEventUuid || `csync-${uuidv4()}`;
+
+  // Decide sourceEventId and mirrorEventId for the database row to keep the original direction
+  let dbSourceEventId: string;
+  let dbMirrorEventId: string | null;
+  let dbSourcePlatform: 'GOOGLE' | 'MICROSOFT';
+  let dbMirrorPlatform: 'GOOGLE' | 'MICROSOFT' | null;
+
+  if (existingEvent) {
+    dbSourceEventId = existingEvent.sourceEventId;
+    dbSourcePlatform = existingEvent.sourcePlatform;
+    
+    if (existingEvent.sourcePlatform === (sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT')) {
+      dbMirrorEventId = mirrorEventId || existingEvent.mirrorEventId;
+      dbMirrorPlatform = mirrorEventId ? (targetProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const) : existingEvent.mirrorPlatform;
+    } else {
+      dbSourceEventId = mirrorEventId || existingEvent.sourceEventId;
+      dbMirrorEventId = existingEvent.mirrorEventId;
+      dbMirrorPlatform = existingEvent.mirrorPlatform;
+    }
+  } else {
+    dbSourceEventId = sourceEventId;
+    dbSourcePlatform = sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const;
+    dbMirrorEventId = mirrorEventId;
+    dbMirrorPlatform = mirrorEventId ? (targetProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const) : null;
+  }
+
   const eventData = {
-    calendarId: calendar.id,
+    calendarId: existingEvent ? existingEvent.calendarId : calendar.id,
     globalEventUuid,
-    sourcePlatform: sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const,
-    sourceEventId,
-    mirrorEventId,
-    mirrorPlatform: mirrorEventId ? (targetProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const) : null,
+    sourcePlatform: dbSourcePlatform,
+    sourceEventId: dbSourceEventId,
+    mirrorEventId: dbMirrorEventId,
+    mirrorPlatform: dbMirrorPlatform,
     syncFingerprint: fingerprint,
     idempotencyKey,
     syncVersion: version,
@@ -249,9 +299,9 @@ async function processEventChange(
     recurringEventId: normalizedEvent.recurringEventId || null,
     isRecurringInstance: normalizedEvent.isRecurringInstance || false,
     meetingLink: normalizedEvent.meetingLink || '',
-    syncState: mirrorEventId ? 'SYNCED' as const : 'PENDING' as const,
+    syncState: (dbMirrorEventId || dbSourceEventId) ? 'SYNCED' as const : 'PENDING' as const,
     conflictState: conflictResult.hasConflict ? 'DETECTED' as const : 'NONE' as const,
-    originPlatform: sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const,
+    originPlatform: existingEvent ? existingEvent.originPlatform : (sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const),
     lastModifiedAt: normalizedEvent.lastModifiedAt || new Date(),
     lastModifiedBy: normalizedEvent.organizerEmail || 'system',
     etag: normalizedEvent.etag || '',
@@ -343,19 +393,22 @@ async function handleEventDeletion(
   calendar: any,
   existingEvent: any,
   targetProvider: CalendarProvider,
-  idempotencyKey: string
+  idempotencyKey: string,
+  targetEventId: string | null
 ): Promise<void> {
-  if (!existingEvent?.mirrorEventId) return;
+  if (!existingEvent) return;
 
   const db = getDatabase();
   try {
-    if (targetProvider === CalendarProvider.GOOGLE) {
-      const targetCal = await db.calendar.findFirst({
-        where: { userId, provider: 'GOOGLE', isPrimary: true },
-      });
-      if (targetCal) await deleteGoogleEvent(userId, targetCal.externalCalendarId, existingEvent.mirrorEventId);
-    } else {
-      await deleteMicrosoftEvent(userId, existingEvent.mirrorEventId);
+    if (targetEventId) {
+      if (targetProvider === CalendarProvider.GOOGLE) {
+        const targetCal = await db.calendar.findFirst({
+          where: { userId, provider: 'GOOGLE', isPrimary: true },
+        });
+        if (targetCal) await deleteGoogleEvent(userId, targetCal.externalCalendarId, targetEventId);
+      } else {
+        await deleteMicrosoftEvent(userId, targetEventId);
+      }
     }
 
     await db.event.update({
