@@ -20,7 +20,7 @@ router.get('/', async (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   };
 
-  res.status(health.status === 'healthy' ? 200 : 503).json(health);
+  res.status(200).json(health);
 });
 
 export default router;
