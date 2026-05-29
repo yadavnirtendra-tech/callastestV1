@@ -597,7 +597,7 @@ router.post('/disconnect/google', authenticateToken, async (req: Request, res: R
       }
 
       // 2. Delete Calendar (Cascade deletes events and webhook subscriptions)
-      await db.calendar.delete({
+      await db.calendar.deleteMany({
         where: { id: calendar.id },
       });
     }
@@ -657,7 +657,7 @@ router.post('/disconnect/microsoft', authenticateToken, async (req: Request, res
       }
 
       // 2. Delete Calendar (Cascade deletes events and webhook subscriptions)
-      await db.calendar.delete({
+      await db.calendar.deleteMany({
         where: { id: calendar.id },
       });
     }

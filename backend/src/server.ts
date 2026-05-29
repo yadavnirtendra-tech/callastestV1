@@ -35,6 +35,9 @@ import { initializeQueues, shutdownQueues } from './queues/syncQueue';
 
 const app = express();
 
+// Trust proxy for rate limiting behind reverse proxies (e.g., Railway)
+app.set('trust proxy', 1);
+
 // ============================================================
 // Security Layer (applied to ALL requests)
 // ============================================================
