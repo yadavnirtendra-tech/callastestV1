@@ -131,12 +131,26 @@ export async function createGoogleEvent(
   const googleEvent = canonicalToGoogleEvent(event);
 
   return withRetry(async () => {
-    const response = await calendar.events.insert({
-      calendarId,
-      requestBody: googleEvent,
-    });
-    syncLogger.info({ userId, calendarId, eventId: response.data.id }, 'Created Google event');
-    return response.data;
+    try {
+      const response = await calendar.events.insert({
+        calendarId,
+        requestBody: googleEvent,
+      });
+      syncLogger.info({ userId, calendarId, eventId: response.data.id }, 'Created Google event');
+      return response.data;
+    } catch (error: any) {
+      if (error.code === 409 && googleEvent.id) {
+        // Event already exists (likely due to a retry of a successful request that timed out).
+        // Fetch and return the existing event to ensure idempotency.
+        syncLogger.info({ userId, calendarId, eventId: googleEvent.id }, 'Google event already exists (409 Conflict), fetching existing event instead.');
+        const getResponse = await calendar.events.get({
+          calendarId,
+          eventId: googleEvent.id,
+        });
+        return getResponse.data;
+      }
+      throw error;
+    }
   }, 'createGoogleEvent');
 }
 
@@ -327,6 +341,12 @@ function canonicalToGoogleEvent(event: CanonicalEvent): calendar_v3.Schema$Event
 
   if (event.recurrenceRule) {
     googleEvent.recurrence = canonicalToGoogleRrule(event.recurrenceRule as any);
+  }
+
+  // Enforce idempotency: use the globalEventUuid as the Google Event ID.
+  // Google requires base32hex for IDs. UUIDs without hyphens are valid base32hex.
+  if (event.globalEventUuid) {
+    googleEvent.id = event.globalEventUuid.replace(/csync-|-/g, '').toLowerCase();
   }
 
   return googleEvent;

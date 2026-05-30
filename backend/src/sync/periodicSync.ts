@@ -24,15 +24,15 @@ export function startPeriodicSyncService(): void {
     syncLogger.error({ err }, 'Initial periodic sync polling check failed')
   );
 
-  // Poll every 5 minutes
-  const FIVE_MINUTES = 5 * 60 * 1000;
+  // Poll every 30 seconds to provide near-instant sync for local dev without verified webhooks
+  const POLLING_INTERVAL = 30 * 1000;
   syncPollTimer = setInterval(() => {
     pollAllActiveCalendars().catch(err =>
       syncLogger.error({ err }, 'Scheduled periodic sync polling failed')
     );
-  }, FIVE_MINUTES);
+  }, POLLING_INTERVAL);
 
-  syncLogger.info('Periodic sync polling service running — checks every 5 minutes');
+  syncLogger.info('Periodic sync polling service running — checks every 30 seconds');
 }
 
 /**
