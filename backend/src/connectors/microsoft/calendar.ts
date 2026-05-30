@@ -75,6 +75,7 @@ export async function getMicrosoftGraphClient(userId: string): Promise<Client> {
       }
     } else {
       syncLogger.warn({ userId }, 'Microsoft token expired and no refresh token is stored');
+      throw new Error('Microsoft token expired and no refresh token is stored — user needs to re-authenticate');
     }
   }
 

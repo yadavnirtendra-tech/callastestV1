@@ -54,17 +54,22 @@ export async function getGoogleAuthClient(userId: string): Promise<OAuth2Client>
   // Auto-refresh if expired
   if (user.googleTokenExpiresAt && new Date() >= user.googleTokenExpiresAt) {
     syncLogger.info({ userId }, 'Refreshing expired Google token');
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    oauth2Client.setCredentials(credentials);
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      oauth2Client.setCredentials(credentials);
 
-    // Store refreshed token
-    await db.user.update({
-      where: { id: userId },
-      data: {
-        googleAccessToken: encrypt(credentials.access_token!),
-        googleTokenExpiresAt: new Date(credentials.expiry_date!),
-      },
-    });
+      // Store refreshed token
+      await db.user.update({
+        where: { id: userId },
+        data: {
+          googleAccessToken: encrypt(credentials.access_token!),
+          googleTokenExpiresAt: new Date(credentials.expiry_date!),
+        },
+      });
+    } catch (error) {
+      syncLogger.error({ userId, error }, 'Failed to refresh Google token');
+      throw new Error('Google token refresh failed — user needs to re-authenticate');
+    }
   }
 
   return oauth2Client;

@@ -96,8 +96,61 @@ export async function processSyncWebhook(
     const duration = Date.now() - startTime;
     syncLogger.info({ userId, provider, duration: `${duration}ms`, processed: changedEvents.length }, 'Sync completed');
 
-  } catch (error) {
+  } catch (error: any) {
     syncLogger.error({ userId, calendarId, provider, error }, 'Sync processing failed');
+    
+    // Check if this is an authentication/authorization failure
+    const msg = error?.message || '';
+    const is401 = error?.status === 401 || error?.statusCode === 401 || msg.includes('401');
+    const isAuth = is401 ||
+      msg.includes('not connected') ||
+      msg.includes('expired and no refresh token') ||
+      msg.includes('token refresh failed') ||
+      msg.includes('re-authenticate') ||
+      msg.includes('Invalid Credentials') ||
+      msg.includes('invalid_grant') ||
+      msg.includes('invalid_token');
+
+    if (isAuth) {
+      syncLogger.warn({ userId, calendarId, provider }, '🔒 Authentication failure detected during sync. Automatically disabling sync for this calendar.');
+      
+      try {
+        // 1. Disable sync for the calendar
+        await db.calendar.update({
+          where: { id: calendarId },
+          data: { syncEnabled: false },
+        });
+
+        // 2. Set connected status to false on user
+        if (provider === CalendarProvider.GOOGLE) {
+          await db.user.update({
+            where: { id: userId },
+            data: { googleConnected: false },
+          });
+        } else {
+          await db.user.update({
+            where: { id: userId },
+            data: { microsoftConnected: false },
+          });
+        }
+
+        // 3. Log a detailed audit event
+        await logAuditEvent({
+          userId,
+          action: AuditAction.SYNC_FAILED,
+          resourceType: AuditResourceType.CALENDAR,
+          resourceId: calendarId,
+          newValue: { error: `Authentication expired. Sync disabled automatically: ${msg}`, provider },
+          source: AuditSource.SYSTEM,
+        });
+      } catch (dbErr) {
+        syncLogger.error({ userId, dbErr }, 'Failed to automatically disable calendar sync on auth failure');
+      }
+
+      // Return gracefully — do NOT throw. This prevents BullMQ/in-memory queue from retrying this failed auth job 5 times.
+      return;
+    }
+
     await logAuditEvent({
       userId,
       action: AuditAction.SYNC_FAILED,
