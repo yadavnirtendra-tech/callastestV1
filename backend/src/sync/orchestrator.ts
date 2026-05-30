@@ -345,26 +345,35 @@ async function processEventChange(
     etag: normalizedEvent.etag || '',
   };
 
-  if (existingEvent) {
-    await db.event.update({ where: { id: existingEvent.id }, data: eventData });
-  } else {
-    await db.event.create({ data: eventData });
-  }
-
-  // 9. Record sync transaction
   const direction = sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE_TO_OUTLOOK' : 'OUTLOOK_TO_GOOGLE';
-  await db.syncTransaction.create({
-    data: {
-      eventId: existingEvent?.id || (await db.event.findUnique({ where: { idempotencyKey } }))!.id,
-      transactionId: idempotencyKey,
-      direction: direction as any,
-      action: action.toUpperCase() as any,
-      status: mirrorEventId ? 'COMPLETED' : 'FAILED',
-      sourceEventId,
-      targetEventId: mirrorEventId,
-      sourcePayload: normalizedEvent as any,
-    },
-  });
+
+  try {
+    if (existingEvent) {
+      await db.event.update({ where: { id: existingEvent.id }, data: eventData });
+    } else {
+      await db.event.create({ data: eventData });
+    }
+
+    // 9. Record sync transaction
+    await db.syncTransaction.create({
+      data: {
+        eventId: existingEvent?.id || (await db.event.findUnique({ where: { idempotencyKey } }))!.id,
+        transactionId: idempotencyKey,
+        direction: direction as any,
+        action: action.toUpperCase() as any,
+        status: mirrorEventId ? 'COMPLETED' : 'FAILED',
+        sourceEventId,
+        targetEventId: mirrorEventId,
+        sourcePayload: normalizedEvent as any,
+      },
+    });
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      syncLogger.info({ userId, sourceEventId }, 'Concurrent sync already committed this event (P2002), skipping gracefully');
+      return;
+    }
+    throw error;
+  }
 
   // 10. Audit log
   await logAuditEvent({
