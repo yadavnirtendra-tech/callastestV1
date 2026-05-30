@@ -23,6 +23,8 @@ import { logAuditEvent } from '../audit/logger';
 import { CalendarProvider, CanonicalEvent, SyncState, ConflictState, AuditAction, AuditResourceType, AuditSource } from '../types';
 import { encrypt } from '../crypto/encryption';
 
+const activeSyncs = new Set<string>();
+
 /**
  * Process a webhook notification — the main sync entry point.
  * Called by the queue worker when a webhook is received.
@@ -32,6 +34,13 @@ export async function processSyncWebhook(
   calendarId: string,
   provider: CalendarProvider
 ): Promise<void> {
+  const lockKey = `${provider}:${calendarId}`;
+  if (activeSyncs.has(lockKey)) {
+    syncLogger.info({ userId, calendarId, provider }, 'Sync already in progress, queuing for retry');
+    throw new Error('Sync already in progress for this calendar');
+  }
+  activeSyncs.add(lockKey);
+
   const db = getDatabase();
   const startTime = Date.now();
 
@@ -96,6 +105,8 @@ export async function processSyncWebhook(
       source: AuditSource.SYSTEM,
     });
     throw error;
+  } finally {
+    activeSyncs.delete(lockKey);
   }
 }
 
@@ -411,12 +422,11 @@ async function handleEventDeletion(
       }
     }
 
-    await db.event.update({
-      where: { id: existingEvent.id },
-      data: { status: 'CANCELLED', syncState: 'SYNCED' },
+    await db.event.delete({
+      where: { id: existingEvent.id }
     });
 
-    syncLogger.info({ userId, eventId: existingEvent.id }, '🗑️ Event deleted on both platforms');
+    syncLogger.info({ userId, eventId: existingEvent.id }, '🗑️ Event deleted on both platforms and removed from local database');
   } catch (error) {
     syncLogger.error({ userId, error }, 'Failed to delete mirror event');
   }

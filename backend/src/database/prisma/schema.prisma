@@ -45,6 +45,9 @@ model User {
   // Email sending preference: AUTO uses the platform the event came from
   emailProvider               EmailProvider @default(AUTO)
   
+  autoRejectEnabled           Boolean   @default(true)
+  customRejectionMessage      String?   @db.Text
+  
   calendars                   Calendar[]
   conflictLogs                ConflictLog[]
   auditLogs                   AuditLog[]

@@ -26,7 +26,14 @@ export async function handleAutoRejection(
   const db = getDatabase();
 
   try {
-    // 1. Record conflict in database
+    // 1. Fetch user preferences
+    const user = await db.user.findUnique({ where: { id: userId } });
+    if (!user || !user.autoRejectEnabled) {
+      conflictLogger.info({ userId, eventTitle: event.title }, 'Auto-reject disabled by user preference. Skipping.');
+      return;
+    }
+
+    // 2. Record conflict in database
     if (!conflictResult.conflicts.length) {
       conflictLogger.warn({ userId }, 'handleAutoRejection called with empty conflicts array — skipping');
       return;
@@ -66,13 +73,13 @@ export async function handleAutoRejection(
     // Fetch up to 3 upcoming free slots to suggest in the rejection email
     const freeSlots = await getAvailableSlots(userId);
 
-    // 2. Queue rejection email
+    // 3. Queue rejection email
     await queueNotification({
       userId,
       type: 'rejection',
       channel: 'email',
       subject: `Meeting Declined: ${event.title || 'Untitled Event'}`,
-      body: buildRejectionEmailBody(event, conflictResult, freeSlots),
+      body: buildRejectionEmailBody(event, conflictResult, freeSlots, user.customRejectionMessage),
       metadata: {
         eventTitle: event.title,
         organizerEmail: event.organizerEmail,
@@ -121,7 +128,8 @@ function buildRejectionReason(result: ConflictDetectionResult): string {
 function buildRejectionEmailBody(
   event: Partial<CanonicalEvent>,
   result: ConflictDetectionResult,
-  freeSlots: string[]
+  freeSlots: string[],
+  customMessage?: string | null
 ): string {
   const conflict = result.conflicts[0];
   const startStr = event.startTime ? new Date(event.startTime).toLocaleString() : 'Unknown';
@@ -139,6 +147,13 @@ function buildRejectionEmailBody(
       <p style="color: #b0b0b0; margin-top: 20px;">I apologize for the inconvenience. Please feel free to suggest some alternative times next week that might work for you.</p>
     `;
 
+  const rejectionText = customMessage 
+    ? `<p style="color: #e4e6eb; font-size: 15px; line-height: 1.5;">${customMessage}</p>`
+    : `<p style="color: #e4e6eb; font-size: 15px; line-height: 1.5;">
+          Thank you for the invitation to <strong>"${event.title || 'Untitled'}"</strong>. 
+          Unfortunately, I am not available at the proposed time of <strong>${startStr}</strong> because it conflicts with a prior calendar commitment.
+        </p>`;
+
   return `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0f111a; border-radius: 12px; border: 1px solid #1e2130;">
       <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 24px; border-radius: 8px 8px 0 0; color: white; text-align: center;">
@@ -146,10 +161,7 @@ function buildRejectionEmailBody(
       </div>
       <div style="background: #0f111a; color: #e4e6eb; padding: 24px; border-radius: 0 0 8px 8px;">
         <p style="color: #e4e6eb; margin-top: 0; font-size: 15px; line-height: 1.5;">Hi,</p>
-        <p style="color: #e4e6eb; font-size: 15px; line-height: 1.5;">
-          Thank you for the invitation to <strong>"${event.title || 'Untitled'}"</strong>. 
-          Unfortunately, I am not available at the proposed time of <strong>${startStr}</strong> because it conflicts with a prior calendar commitment.
-        </p>
+        ${rejectionText}
         
         ${slotsListHtml}
 

@@ -567,6 +567,7 @@ router.get('/session', async (req: Request, res: Response) => {
         id: true, email: true, displayName: true, role: true,
         googleConnected: true, microsoftConnected: true,
         lastSyncAt: true, isActive: true,
+        autoRejectEnabled: true, customRejectionMessage: true,
       },
     });
 
@@ -584,6 +585,42 @@ router.get('/session', async (req: Request, res: Response) => {
 router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie('token');
   res.json({ success: true, data: { message: 'Logged out successfully' } });
+});
+
+/** Update User Settings */
+router.put('/settings', authenticateToken, async (req: Request, res: Response) => {
+  const userId = req.user!.sub;
+  const { autoRejectEnabled, customRejectionMessage } = req.body;
+
+  try {
+    const db = getDatabase();
+    
+    // Enforce reasonable limits on the custom message
+    const cleanMessage = customRejectionMessage 
+      ? String(customRejectionMessage).substring(0, 500)
+      : null;
+
+    const updatedUser = await db.user.update({
+      where: { id: userId },
+      data: {
+        autoRejectEnabled: typeof autoRejectEnabled === 'boolean' ? autoRejectEnabled : undefined,
+        customRejectionMessage: cleanMessage,
+      },
+      select: {
+        id: true,
+        autoRejectEnabled: true,
+        customRejectionMessage: true,
+      }
+    });
+
+    res.json({ success: true, data: { user: updatedUser } });
+  } catch (error) {
+    authLogger.error({ userId, error }, 'Failed to update user settings');
+    res.status(500).json({
+      success: false,
+      error: { code: 'UPDATE_FAILED', message: 'Failed to update settings' },
+    });
+  }
 });
 
 /** Disconnect Google Calendar */

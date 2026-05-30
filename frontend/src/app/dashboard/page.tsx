@@ -95,6 +95,12 @@ export default function DashboardPage() {
   const [useCustomDecline, setUseCustomDecline] = useState(false);
   const [declineLoading, setDeclineLoading] = useState(false);
 
+  // Settings State
+  const [autoRejectEnabled, setAutoRejectEnabled] = useState(true);
+  const [customRejectionMessage, setCustomRejectionMessage] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
+
   useEffect(() => {
     fetchSession();
   }, []);
@@ -125,6 +131,8 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success && data.data.authenticated) {
         setSession(data.data.user);
+        setAutoRejectEnabled(data.data.user.autoRejectEnabled ?? true);
+        setCustomRejectionMessage(data.data.user.customRejectionMessage || '');
       } else {
         router.push('/');
       }
@@ -350,6 +358,32 @@ export default function DashboardPage() {
     }
   }
 
+  // Handle Save Settings
+  async function saveSettings(e: React.FormEvent) {
+    e.preventDefault();
+    setSettingsLoading(true);
+    setSettingsMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/auth/settings`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRejectEnabled, customRejectionMessage }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSettingsMessage('Settings saved successfully!');
+        setTimeout(() => setSettingsMessage(''), 3000);
+      } else {
+        setSettingsMessage(data.error?.message || 'Failed to save settings.');
+      }
+    } catch (err) {
+      setSettingsMessage('Network error occurred.');
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
   // Month navigation helpers
   const handlePrevMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
@@ -401,6 +435,15 @@ export default function DashboardPage() {
   // Get events on a specific day
   const getEventsForDate = (date: Date) => {
     return events.filter(event => {
+      if (event.isAllDay) {
+        // For all day events, use the UTC date parts directly
+        const dateString = event.startTime.split('T')[0];
+        const year = parseInt(dateString.substring(0, 4), 10);
+        const month = parseInt(dateString.substring(5, 7), 10) - 1;
+        const day = parseInt(dateString.substring(8, 10), 10);
+        return year === date.getFullYear() && month === date.getMonth() && day === date.getDate();
+      }
+
       const eventDate = new Date(event.startTime);
       return (
         eventDate.getDate() === date.getDate() &&
@@ -811,6 +854,54 @@ export default function DashboardPage() {
               })}
             </div>
           </div>
+
+          {/* Settings Container */}
+          <div className="settings-container" style={{ marginTop: '32px', background: 'var(--bg-card)', borderRadius: '12px', border: '1px solid var(--border)', padding: '24px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Account Settings</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '20px' }}>Manage your calendar preferences and auto-rejection behavior.</p>
+            
+            <form onSubmit={saveSettings}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoRejectEnabled}
+                    onChange={e => setAutoRejectEnabled(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: 'var(--accent-primary)' }}
+                  />
+                  Auto-reject conflicting meeting invitations
+                </label>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '24px', marginTop: '4px' }}>
+                  If enabled, new invitations that conflict with your existing calendar events will be automatically declined.
+                </div>
+              </div>
+
+              {autoRejectEnabled && (
+                <div style={{ marginBottom: '20px', marginLeft: '24px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>Custom Rejection Email Message (Optional)</label>
+                  <textarea
+                    className="form-input"
+                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none', minHeight: '80px', fontSize: '14px' }}
+                    value={customRejectionMessage}
+                    onChange={e => setCustomRejectionMessage(e.target.value)}
+                    placeholder="E.g. Thank you for the invitation, but I have a conflict at this time. Please see the suggested alternative times below..."
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <button type="submit" className="btn btn-primary" disabled={settingsLoading}>
+                  {settingsLoading ? 'Saving...' : 'Save Settings'}
+                </button>
+                {settingsMessage && (
+                  <span style={{ fontSize: '13px', color: settingsMessage.includes('Failed') || settingsMessage.includes('error') ? 'var(--error)' : 'var(--success)' }}>
+                    {settingsMessage}
+                  </span>
+                )}
+              </div>
+            </form>
+          </div>
+
         </div>
       </main>
 

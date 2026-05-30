@@ -42,6 +42,9 @@ router.get('/', async (req: Request, res: Response) => {
         calendar: {
           userId,
         },
+        status: {
+          not: 'CANCELLED'
+        }
       },
       include: {
         calendar: true,

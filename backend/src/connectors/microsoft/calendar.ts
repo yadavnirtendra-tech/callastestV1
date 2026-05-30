@@ -101,9 +101,9 @@ export async function listMicrosoftEvents(
     // Use delta link for incremental sync, or start fresh
     let url = deltaLink;
     if (!url) {
-      // Initial sync — fetch events from 30 days in the past to 30 days in the future using calendarView/delta
+      // Initial sync — fetch events from 7 days in the past to 30 days in the future using calendarView/delta
       const now = new Date();
-      const startDateTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const startDateTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const endDateTime = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
       url = `/me/calendars/${calendarId}/calendarView/delta?startDateTime=${startDateTime}&endDateTime=${endDateTime}`;
     }
@@ -308,8 +308,8 @@ function canonicalToMicrosoftEvent(event: CanonicalEvent): any {
   const msEvent: any = {
     subject: event.title,
     body: { contentType: 'text', content: event.description },
-    start: { dateTime: event.startTime.toISOString().replace('Z', ''), timeZone: event.timezone || 'UTC' },
-    end: { dateTime: event.endTime.toISOString().replace('Z', ''), timeZone: event.timezone || 'UTC' },
+    start: { dateTime: event.startTime.toISOString().replace('Z', ''), timeZone: 'UTC' },
+    end: { dateTime: event.endTime.toISOString().replace('Z', ''), timeZone: 'UTC' },
     isAllDay: event.isAllDay,
     location: { displayName: event.location },
     showAs: reverseMapShowAs(event.showAs),
