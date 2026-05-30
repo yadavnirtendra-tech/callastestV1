@@ -11,7 +11,7 @@
 // 7. Audit logging everything
 // ============================================================
 
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import getDatabase from '../database/client';
 import { syncLogger } from '../utils/logger';
 import { generateSyncFingerprint, isSyncLoop, generateIdempotencyKey } from './fingerprint';
@@ -239,9 +239,15 @@ async function processEventChange(
       targetEventId = existingEvent.sourceEventId;
     }
   }
-
   // 7. Create or update mirror event on target platform
   let mirrorEventId: string | null = null;
+
+  // Generate deterministic global UUID early so connectors can use it for idempotency (e.g. Google Event ID)
+  // We use UUIDv5 based on the sourceEventId so that concurrent webhook processing of the same event
+  // will generate the exact same globalEventUuid.
+  const SYNC_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+  const globalEventUuid = existingEvent?.globalEventUuid || uuidv5(sourceEventId, SYNC_NAMESPACE);
+  (normalizedEvent as CanonicalEvent).globalEventUuid = globalEventUuid;
 
   if (action === 'create') {
     mirrorEventId = await createMirrorEvent(userId, targetCalendar, normalizedEvent as CanonicalEvent, targetProvider, fingerprint);
@@ -255,8 +261,6 @@ async function processEventChange(
   }
 
   // 8. Upsert the canonical event in our database
-  const globalEventUuid = existingEvent?.globalEventUuid || `csync-${uuidv4()}`;
-
   // Decide sourceEventId and mirrorEventId for the database row to keep the original direction
   let dbSourceEventId: string;
   let dbMirrorEventId: string | null;
