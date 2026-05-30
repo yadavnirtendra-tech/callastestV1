@@ -42,9 +42,11 @@ export async function handleAutoRejection(
 
     // Validate eventId — synthetic IDs like 'google-busy', 'microsoft-busy', 'incoming'
     // are NOT real DB UUIDs and would cause an FK constraint violation.
+    // Validate eventId — synthetic IDs like 'google-busy', 'microsoft-busy', 'incoming'
+    // are NOT real DB UUIDs and would cause an FK constraint violation.
     const SYNTHETIC_IDS = new Set(['incoming', 'google-busy', 'microsoft-busy']);
     const rawEventId = mainConflict.existingEvent?.eventId;
-    const safeEventId = (rawEventId && !SYNTHETIC_IDS.has(rawEventId)) ? rawEventId : uuidv4();
+    const safeEventId = (rawEventId && !SYNTHETIC_IDS.has(rawEventId)) ? rawEventId : undefined;
 
     await db.conflictLog.create({
       data: {
