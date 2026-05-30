@@ -36,6 +36,15 @@ describe('generateSyncFingerprint', () => {
     const fp = generateSyncFingerprint(baseEvent as any);
     expect(fp).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it('handles invalid or missing start/end times safely', () => {
+    const invalidEvent = {
+      ...baseEvent,
+      startTime: new Date(''),
+      endTime: new Date('undefinedZ'),
+    };
+    expect(() => generateSyncFingerprint(invalidEvent as any)).not.toThrow();
+  });
 });
 
 describe('isSyncLoop', () => {

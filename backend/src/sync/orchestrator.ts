@@ -437,8 +437,9 @@ async function handleEventDeletion(
   if (!existingEvent) return;
 
   const db = getDatabase();
-  try {
-    if (targetEventId) {
+  
+  if (targetEventId) {
+    try {
       if (targetProvider === CalendarProvider.GOOGLE) {
         const targetCal = await db.calendar.findFirst({
           where: { userId, provider: 'GOOGLE', isPrimary: true },
@@ -447,15 +448,24 @@ async function handleEventDeletion(
       } else {
         await deleteMicrosoftEvent(userId, targetEventId);
       }
+    } catch (error: any) {
+      // Log the error but continue so we still clean up our database
+      const is404 = error.status === 404 || error.statusCode === 404 || error.code === 404 || (error.message && error.message.includes('404'));
+      if (is404) {
+        syncLogger.warn({ userId, targetEventId, targetProvider }, 'Mirror event already deleted on target platform (404)');
+      } else {
+        syncLogger.error({ userId, targetEventId, error }, 'Failed to delete mirror event from target platform');
+      }
     }
+  }
 
+  try {
     await db.event.delete({
       where: { id: existingEvent.id }
     });
-
     syncLogger.info({ userId, eventId: existingEvent.id }, '🗑️ Event deleted on both platforms and removed from local database');
   } catch (error) {
-    syncLogger.error({ userId, error }, 'Failed to delete mirror event');
+    syncLogger.error({ userId, eventId: existingEvent.id, error }, 'Failed to delete event from local database');
   }
 }
 

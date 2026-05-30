@@ -50,10 +50,18 @@ function normalizeForFingerprint(event: Partial<CanonicalEvent> | any): EventSyn
  */
 function normalizeTime(time: any): string {
   if (!time) return '';
-  if (time instanceof Date) return time.toISOString();
-  if (typeof time === 'string') return new Date(time).toISOString();
+  if (time instanceof Date) {
+    return isNaN(time.getTime()) ? '' : time.toISOString();
+  }
+  if (typeof time === 'string') {
+    const d = new Date(time);
+    return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
   // Google format: { dateTime: '...', timeZone: '...' }
-  if (time.dateTime) return new Date(time.dateTime).toISOString();
+  if (time.dateTime) {
+    const d = new Date(time.dateTime);
+    return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
   if (time.date) return time.date;
   return '';
 }
