@@ -65,9 +65,30 @@ export async function processSyncWebhook(
     let newSyncToken: string | null = null;
 
     if (provider === CalendarProvider.GOOGLE) {
-      const result = await listGoogleEvents(userId, calendar.externalCalendarId, calendar.syncToken);
-      changedEvents = result.events;
-      newSyncToken = result.nextSyncToken;
+      try {
+        const result = await listGoogleEvents(userId, calendar.externalCalendarId, calendar.syncToken);
+        changedEvents = result.events;
+        newSyncToken = result.nextSyncToken;
+      } catch (error: any) {
+        const msg = error?.message || '';
+        const isSyncTokenExpired = error?.status === 410 || error?.statusCode === 410 ||
+          msg.includes('Sync token') ||
+          msg.includes('Gone') ||
+          msg.includes('Resource not found for the segment');
+
+        if (isSyncTokenExpired && calendar.syncToken) {
+          syncLogger.warn({ userId, calendarId }, '🔄 Google syncToken expired/invalid, clearing and performing full sync');
+          await db.calendar.update({
+            where: { id: calendarId },
+            data: { syncToken: null },
+          });
+          const result = await listGoogleEvents(userId, calendar.externalCalendarId, null);
+          changedEvents = result.events;
+          newSyncToken = result.nextSyncToken;
+        } else {
+          throw error;
+        }
+      }
     } else {
       const result = await listMicrosoftEvents(userId, calendar.externalCalendarId, calendar.syncToken);
       changedEvents = result.events;

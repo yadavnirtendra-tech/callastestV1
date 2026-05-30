@@ -92,12 +92,12 @@ export async function listGoogleEvents(
       calendarId,
       maxResults: 250,
       singleEvents: true,
-      orderBy: 'updated',
     };
 
     if (syncToken) {
       params.syncToken = syncToken;
     } else {
+      params.orderBy = 'updated';
       // Initial sync — fetch events from 7 days in the past to 30 days in the future
       const now = new Date();
       params.timeMin = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
