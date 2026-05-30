@@ -88,6 +88,10 @@ export async function checkForConflicts(
           if (googleCalendar) {
             const googleBusy = await getGoogleFreeBusy(userId, googleCalendar.externalCalendarId, startTime, endTime);
             for (const slot of googleBusy) {
+              // Skip self-conflict: if the slot matches the queried start/end exactly, it's likely the event itself
+              if (slot.start.getTime() === startTime.getTime() && slot.end.getTime() === endTime.getTime()) {
+                continue;
+              }
               if (hasTimeOverlap(startTime, endTime, slot.start, slot.end)) {
                 const alreadyFound = conflicts.some(c => 
                   c.existingEvent.startTime.getTime() === slot.start.getTime() &&
@@ -132,6 +136,10 @@ export async function checkForConflicts(
         try {
           const msBusy = await getMicrosoftFreeBusy(userId, user.email, startTime, endTime);
           for (const slot of msBusy) {
+            // Skip self-conflict: if the slot matches the queried start/end exactly, it's likely the event itself
+            if (slot.start.getTime() === startTime.getTime() && slot.end.getTime() === endTime.getTime()) {
+              continue;
+            }
             if (hasTimeOverlap(startTime, endTime, slot.start, slot.end)) {
               const alreadyFound = conflicts.some(c =>
                 c.existingEvent.startTime.getTime() === slot.start.getTime() &&

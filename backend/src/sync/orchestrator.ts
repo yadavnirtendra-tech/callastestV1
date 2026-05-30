@@ -36,8 +36,10 @@ export async function processSyncWebhook(
 ): Promise<void> {
   const lockKey = `${provider}:${calendarId}`;
   if (activeSyncs.has(lockKey)) {
-    syncLogger.info({ userId, calendarId, provider }, 'Sync already in progress, queuing for retry');
-    throw new Error('Sync already in progress for this calendar');
+    // Silently skip — another sync for this calendar is already running.
+    // Do NOT throw: throwing causes BullMQ to retry, which triggers even more duplicates.
+    syncLogger.info({ userId, calendarId, provider }, 'Sync already in progress for this calendar — skipping (not retrying)');
+    return;
   }
   activeSyncs.add(lockKey);
 
@@ -155,7 +157,22 @@ async function processEventChange(
   });
 
   if (existingEvent) {
-    // Check if this change was caused by our own sync
+    // MIRROR-MATCH DETECTION: If the incoming event is the mirror WE created
+    // (i.e., the sourceEventId matches our mirrorEventId), this is our own sync
+    // bouncing back. Skip it to prevent duplication.
+    const incomingPlatformStr = sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' : 'MICROSOFT';
+    if (
+      existingEvent.mirrorEventId === sourceEventId &&
+      existingEvent.mirrorPlatform === incomingPlatformStr
+    ) {
+      syncLogger.info(
+        { userId, sourceEventId, provider: sourceProvider },
+        '🔄 MIRROR-MATCH — incoming event IS our own mirror, skipping to prevent duplication'
+      );
+      return;
+    }
+
+    // Check if this change was caused by our own sync (fingerprint comparison)
     if (isSyncLoop(fingerprint, existingEvent.syncFingerprint)) {
       syncLogger.info(
         { userId, sourceEventId, provider: sourceProvider },
@@ -216,18 +233,24 @@ async function processEventChange(
     return;
   }
 
-  // 6. CONFLICT CHECK — check both calendars before syncing
-  const conflictResult = await checkForConflicts(
-    userId,
-    normalizedEvent.startTime!,
-    normalizedEvent.endTime!,
-    existingEvent?.id
-  );
+  // 6. CONFLICT CHECK — only auto-reject INCOMING INVITATIONS from other people.
+  // User's own events (isOrganizer=true) must never be auto-rejected during sync —
+  // they should always mirror to the other platform regardless of conflicts.
+  const isIncomingInvitation = !normalizedEvent.isOrganizer;
 
-  if (conflictResult.hasConflict && conflictResult.recommendation === 'auto_reject') {
-    syncLogger.info({ userId, sourceEventId, conflicts: conflictResult.conflicts.length }, 'Conflict detected — auto-rejecting');
-    await handleAutoRejection(userId, normalizedEvent as any, conflictResult, calendar, idempotencyKey);
-    return;
+  if (isIncomingInvitation) {
+    const conflictResult = await checkForConflicts(
+      userId,
+      normalizedEvent.startTime!,
+      normalizedEvent.endTime!,
+      existingEvent?.id
+    );
+
+    if (conflictResult.hasConflict && conflictResult.recommendation === 'auto_reject') {
+      syncLogger.info({ userId, sourceEventId, conflicts: conflictResult.conflicts.length }, 'Incoming invitation conflict detected — auto-rejecting');
+      await handleAutoRejection(userId, normalizedEvent as any, conflictResult, calendar, idempotencyKey);
+      return;
+    }
   }
 
   // Determine the targetEventId to update if updating
@@ -315,7 +338,7 @@ async function processEventChange(
     isRecurringInstance: normalizedEvent.isRecurringInstance || false,
     meetingLink: normalizedEvent.meetingLink || '',
     syncState: (dbMirrorEventId || dbSourceEventId) ? 'SYNCED' as const : 'PENDING' as const,
-    conflictState: conflictResult.hasConflict ? 'DETECTED' as const : 'NONE' as const,
+    conflictState: 'NONE' as const,
     originPlatform: existingEvent ? existingEvent.originPlatform : (sourceProvider === CalendarProvider.GOOGLE ? 'GOOGLE' as const : 'MICROSOFT' as const),
     lastModifiedAt: normalizedEvent.lastModifiedAt || new Date(),
     lastModifiedBy: normalizedEvent.organizerEmail || 'system',

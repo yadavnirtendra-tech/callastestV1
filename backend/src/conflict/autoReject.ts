@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Handle automatic rejection of a conflicting event.
+ * This function must NEVER throw — a crash here kills the sync worker.
  */
 export async function handleAutoRejection(
   userId: string,
@@ -23,9 +24,9 @@ export async function handleAutoRejection(
   calendar: any,
   idempotencyKey: string
 ): Promise<void> {
-  const db = getDatabase();
-
   try {
+    const db = getDatabase();
+
     // 1. Fetch user preferences
     const user = await db.user.findUnique({ where: { id: userId } });
     if (!user || !user.autoRejectEnabled) {
@@ -33,15 +34,17 @@ export async function handleAutoRejection(
       return;
     }
 
-    // 2. Record conflict in database
-    if (!conflictResult.conflicts.length) {
-      conflictLogger.warn({ userId }, 'handleAutoRejection called with empty conflicts array — skipping');
+    // 2. Validate conflicts array
+    if (!conflictResult?.conflicts?.length) {
+      conflictLogger.warn({ userId }, 'handleAutoRejection called with empty or missing conflicts array — skipping');
       return;
     }
     const mainConflict = conflictResult.conflicts[0];
+    if (!mainConflict) {
+      conflictLogger.warn({ userId }, 'handleAutoRejection: mainConflict is falsy — skipping');
+      return;
+    }
 
-    // Validate eventId — synthetic IDs like 'google-busy', 'microsoft-busy', 'incoming'
-    // are NOT real DB UUIDs and would cause an FK constraint violation.
     // Validate eventId — synthetic IDs like 'google-busy', 'microsoft-busy', 'incoming'
     // are NOT real DB UUIDs and would cause an FK constraint violation.
     const SYNTHETIC_IDS = new Set(['incoming', 'google-busy', 'microsoft-busy']);
@@ -55,16 +58,16 @@ export async function handleAutoRejection(
         conflictType: mainConflict?.type?.toUpperCase() as any || 'TIME_OVERLAP',
         resolution: 'AUTO_REJECTED',
         conflictingEventData: {
-          incomingTitle: event.title,
+          incomingTitle: event.title || '(Unknown)',
           incomingStart: event.startTime,
           incomingEnd: event.endTime,
-          incomingOrganizer: event.organizerEmail,
+          incomingOrganizer: event.organizerEmail || '',
           syntheticId: SYNTHETIC_IDS.has(rawEventId || '') ? rawEventId : undefined,
           conflicts: conflictResult.conflicts.map(c => ({
-            existingTitle: c.existingEvent.title,
-            existingStart: c.existingEvent.startTime,
-            existingEnd: c.existingEvent.endTime,
-            overlapMinutes: c.overlapMinutes,
+            existingTitle: c?.existingEvent?.title || '(Unknown)',
+            existingStart: c?.existingEvent?.startTime,
+            existingEnd: c?.existingEvent?.endTime,
+            overlapMinutes: c?.overlapMinutes || 0,
           })),
         },
         rejectionReason: buildRejectionReason(conflictResult),
@@ -83,8 +86,8 @@ export async function handleAutoRejection(
       subject: `Meeting Declined: ${event.title || 'Untitled Event'}`,
       body: buildRejectionEmailBody(event, conflictResult, freeSlots, user.customRejectionMessage),
       metadata: {
-        eventTitle: event.title,
-        organizerEmail: event.organizerEmail,
+        eventTitle: event.title || 'Untitled Event',
+        organizerEmail: event.organizerEmail || '',
         startTime: event.startTime,
         endTime: event.endTime,
         conflictCount: conflictResult.conflicts.length,
@@ -94,7 +97,7 @@ export async function handleAutoRejection(
       },
     });
 
-    // 3. Audit log
+    // 4. Audit log
     await logAuditEvent({
       userId,
       action: AuditAction.INVITE_AUTO_REJECTED,
@@ -117,7 +120,9 @@ export async function handleAutoRejection(
     }, '❌ Meeting auto-rejected due to conflict');
 
   } catch (error) {
-    conflictLogger.error({ userId, error }, 'Failed to handle auto-rejection');
+    // CRITICAL: Never let auto-reject crash the sync worker.
+    // Log the error and return gracefully — the event will still sync.
+    conflictLogger.error({ userId, error, eventTitle: event.title }, 'Failed to handle auto-rejection (non-fatal, sync continues)');
   }
 }
 

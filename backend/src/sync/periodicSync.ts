@@ -1,9 +1,10 @@
 // ============================================================
 // Enterprise Calendar Sync — Periodic Sync Polling Service
 // ============================================================
-// Periodically polls and synchronizes all active calendars.
-// Acts as a fallback for webhook connection issues and domain
-// validation requirements, running every 5 minutes.
+// Safety-net polling that catches any events missed by webhooks.
+// On Railway, real webhooks handle most sync — this is a fallback.
+// Runs every 5 minutes to avoid racing with webhook-triggered syncs
+// (30-second polling caused duplicate events due to race conditions).
 // ============================================================
 
 import getDatabase from '../database/client';
@@ -14,25 +15,27 @@ let syncPollTimer: NodeJS.Timeout | null = null;
 
 /**
  * Start the periodic sync polling service.
- * Runs every 5 minutes.
+ * Runs every 5 minutes as a fallback behind real webhooks.
  */
 export function startPeriodicSyncService(): void {
-  syncLogger.info('Starting periodic sync polling service');
+  syncLogger.info('Starting periodic sync polling service (5-minute interval)');
 
-  // Trigger initial polling sync on startup
+  // Trigger initial polling sync on startup (catches anything missed while server was down)
   pollAllActiveCalendars().catch(err =>
     syncLogger.error({ err }, 'Initial periodic sync polling check failed')
   );
 
-  // Poll every 30 seconds to provide near-instant sync for local dev without verified webhooks
-  const POLLING_INTERVAL = 30 * 1000;
+  // Poll every 5 minutes — webhooks handle real-time sync on Railway.
+  // DO NOT reduce this below 5 minutes: shorter intervals race with webhook-triggered
+  // syncs and cause duplicate events on the target platform.
+  const FIVE_MINUTES = 5 * 60 * 1000;
   syncPollTimer = setInterval(() => {
     pollAllActiveCalendars().catch(err =>
       syncLogger.error({ err }, 'Scheduled periodic sync polling failed')
     );
-  }, POLLING_INTERVAL);
+  }, FIVE_MINUTES);
 
-  syncLogger.info('Periodic sync polling service running — checks every 30 seconds');
+  syncLogger.info('Periodic sync polling service running — checks every 5 minutes (webhooks handle real-time)');
 }
 
 /**

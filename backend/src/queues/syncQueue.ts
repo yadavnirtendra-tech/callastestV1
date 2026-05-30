@@ -96,18 +96,46 @@ export function initializeQueues(): void {
   }
 }
 
+// ---- Deduplication ----
+// Prevents webhook + periodic poll from triggering duplicate sync jobs
+// for the same calendar within a short window.
+const recentSyncJobs = new Map<string, number>(); // key → timestamp
+const DEDUP_WINDOW_MS = 10_000; // 10 seconds
+
 /**
  * Add a sync job to the background queue or process immediately if Redis is offline.
+ * Includes a 10-second deduplication window to prevent webhook + poll race conditions.
  */
 export async function addSyncJob(userId: string, calendarId: string, provider: string): Promise<void> {
+  // Deduplication: skip if the same calendar was synced within the last 10 seconds
+  const dedupKey = `${userId}:${calendarId}`;
+  const now = Date.now();
+  const lastSync = recentSyncJobs.get(dedupKey);
+  if (lastSync && (now - lastSync) < DEDUP_WINDOW_MS) {
+    syncLogger.debug({ userId, calendarId, provider }, 'Sync job deduplicated — same calendar synced within 10s window');
+    return;
+  }
+  recentSyncJobs.set(dedupKey, now);
+
+  // Clean up old entries periodically (prevent memory leak)
+  if (recentSyncJobs.size > 500) {
+    const cutoff = now - DEDUP_WINDOW_MS;
+    for (const [key, ts] of recentSyncJobs) {
+      if (ts < cutoff) recentSyncJobs.delete(key);
+    }
+  }
+
   const connection = getRedisConnection();
   
   if (connection && syncQueue) {
     try {
+      // Use a deterministic jobId so BullMQ also deduplicates at the queue level
+      const jobId = `sync-${userId}-${calendarId}-${Math.floor(now / DEDUP_WINDOW_MS)}`;
       await syncQueue.add(
         'sync-event',
         { userId, calendarId, provider },
         {
+          jobId, // BullMQ ignores duplicate jobIds that are still in the queue
           attempts: config.sync.maxRetries,
           backoff: {
             type: 'exponential',

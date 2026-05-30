@@ -140,7 +140,7 @@ const server = app.listen(config.port, config.host, () => {
   startWebhookRenewalService();
   // Start email notification worker (polls every 30s)
   startNotificationWorker();
-  // Start periodic sync polling service (runs every 5m)
+  // Start periodic sync polling service (5-min fallback behind webhooks on Railway)
   startPeriodicSyncService();
 
   logger.info(`
